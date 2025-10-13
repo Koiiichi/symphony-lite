@@ -1,0 +1,17 @@
+{
+  "name": "portfolio-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "React frontend for a dark-themed portfolio",
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "scripts": {
+    "start": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 3000"
+  },
+  "keywords": ["portfolio","frontend","react"],
+  "license": "MIT"
+}

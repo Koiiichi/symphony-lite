@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dark Portfolio</title>
+  <style>
+    :root {
+      --bg: #0b0f17;
+      --card: #141b26;
+      --text: #e7f0f9;
+      --muted: #a0b4c2;
+      --accent: #7c5cff;
+      --accent-2: #2dd4bf;
+    }
+    * { box-sizing: border-box; }
+    html, body, #root { height: 100%; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system;
+      background: #0b0f15;
+      color: var(--text);
+      background-image: radial-gradient(circle at 20% -10%, rgba(124,92,255,.15), transparent 40%),
+                        radial-gradient(circle at 100% 0%, rgba(45,212,191,.12), transparent 40%),
+                        linear-gradient(#0b0f15, #0b0f15);
+    }
+    header {
+      padding: 24px 32px;
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+      position: sticky; top: 0; backdrop-filter: blur(4px);
+      background: rgba(11,15,21,.8);
+      z-index: 10;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); display: inline-block; }
+    nav a { color: #dbe7f7; text-decoration: none; margin: 0 8px; font-size: 14px; opacity:.8; }
+    main { padding: 32px; max-width: 1100px; margin: 0 auto; }
+
+    .section-title { font-size: 2rem; margin: 8px 0 18px; }
+    .subtle { color: var(--muted); font-size: 0.95rem; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+    .card {
+      background: linear-gradient(135deg, rgba(20,26,38,.95), rgba(20,26,38,.8));
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 8px 20px rgba(0,0,0,.25);
+      transition: transform .2s ease, box-shadow .2s ease;
+    }
+    .card:hover { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(0,0,0,.4); }
+    .card img { width: 100%; height: 150px; object-fit: cover; border-radius: 8px; background:#111; }
+    .card h3 { margin: 8px 0 6px; font-size: 1.1rem; }
+    .card p { margin: 0 0 8px; color: #d1e3f7; font-size: 0.95rem; }
+    .tech { font-size: 12px; color: #9bd0ff; background: rgba(124,92,255,.15); padding: 4px 6px; border-radius: 6px; display: inline-block; margin-right: 6px; }
+
+    .section { margin: 28px 0; }
+
+    form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    input, textarea { padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,.2); background: #0f1620; color: #e9f0ff; }
+    textarea { grid-column: 1 / -1; min-height: 120px; resize: vertical; }
+    button { padding: 12px 16px; border-radius: 6px; border: none; background: var(--accent); color: white; cursor: pointer; }
+    .success { color: #7cffb1; font-size: .95rem; }
+    .error { color: #ff8a8a; font-size: .95rem; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Console in-page message -->
+  <script>console.log("Frontend loading...");</script>
+
+  <!-- React and ReactDOM from CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+  <script type="text/javascript">
+    const { useState } = React;
+
+    const projects = [
+      {
+        id: 1,
+        title: "Aurora Dashboard",
+        description: "A responsive admin dashboard with dark theme and charts.",
+        tech: ["React", "D3", "CSS"],
+        image: "" // placeholder
+      },
+      {
+        id: 2,
+        title: "Nebula Portfolio",
+        description: "Personal portfolio site with parallax and smooth transitions.",
+        tech: ["React", "GSAP", "CSS"],
+        image: ""
+      },
+      {
+        id: 3,
+        title: "Luma E-commerce",
+        description: "Minimalistic storefront with search and filtering.",
+        tech: ["React", "Redux", "API"],
+        image: ""
+      },
+      {
+        id: 4,
+        title: "Flux Editor",
+        description: "Code editor UI with syntax highlighting mock.",
+        tech: ["React", "CodeMirror"],
+        image: ""
+      }
+    ];
+
+    function ProjectCard({p}) {
+      return (
+        React.createElement('article', { className: 'card' },
+          React.createElement('div', {className:'thumb', style:{height:150, background:'linear-gradient(#1f2a40,#111)', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', color:'#8fb3ff'}},
+            p.image ? React.createElement('img', {src: p.image, alt: p.title, style: {width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8}}) : React.createElement('span', {style:{fontSize:14, opacity:.8}}, 'Image')
+          ),
+          React.createElement('h3', null, p.title),
+          React.createElement('p', null, p.description),
+          React.createElement('div', null,
+            p.tech.map(t => React.createElement('span', {className:'tech', key: t}, t))
+          )
+        )
+      );
+    }
+
+    function App() {
+      const [name, setName] = useState('');
+      const [email, setEmail] = useState('');
+      const [message, setMessage] = useState('');
+      const [status, setStatus] = useState(null);
+
+      function submit(e){
+        e.preventDefault();
+        setStatus(null);
+        fetch('/api/contact', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ name, email, message })
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            setStatus({type:'success', text:'Message sent. Thanks!'});
+            setName(''); setEmail(''); setMessage('');
+          } else {
+            setStatus({type:'error', text:'Failed to send message.'});
+          }
+        })
+        .catch(() => setStatus({type:'error', text:'Network error.'}));
+      }
+
+      return (
+        React.createElement('div', null,
+          React.createElement('header', {id:'top'},
+            React.createElement('div', {className:'brand'},
+              React.createElement('span', {className:'dot'}),
+              React.createElement('div', null,
+                React.createElement('strong', null, 'Dark Portfolio'),
+                React.createElement('div', {className:'subtle'}, 'Projects grid & contact form')
+              )
+            ),
+            React.createElement('nav', null,
+              React.createElement('a', {href:'#projects'}, 'Projects'),
+              React.createElement('a', {href:'#contact'}, 'Contact')
+            )
+          ),
+          React.createElement('main', null,
+            React.createElement('section', {className:'section', id:'projects'},
+              React.createElement('h2', {className:'section-title'}, 'Projects'),
+              React.createElement('p', {className:'subtle'}, 'A compact grid of dark-themed projects.'),
+              React.createElement('div', {className:'grid'}, projects.map(p => React.createElement(ProjectCard, {p, key: p.id})))
+            ),
+            React.createElement('section', {className:'section', id:'contact'},
+              React.createElement('h2', {className:'section-title'}, 'Contact'),
+              React.createElement('p', {className:'subtle'}, 'Tell me about your project.'),
+              React.createElement('form', {onSubmit: submit},
+                React.createElement('input', {type:'text', placeholder:'Name', required:true, value:name, onChange:(e)=>setName(e.target.value)}),
+                React.createElement('input', {type:'email', placeholder:'Email', required:true, value:email, onChange:(e)=>setEmail(e.target.value)}),
+                React.createElement('textarea', {placeholder:'Message', required:true, value:message, onChange:(e)=>setMessage(e.target.value)}),
+                React.createElement('button', {type:'submit'}, 'Send')
+              ),
+              status && React.createElement('div', {style:{marginTop:8}}, status.type==='success'
+                ? React.createElement('span', {className:'success'}, status.text)
+                : React.createElement('span', {className:'error'}, status.text)
+              )
+            )
+          ),
+          React.createElement('footer', {className:'subtle', style:{textAlign:'center', padding:'16px 0'}}, '© ', new Date().getFullYear(), ' Your Name')
+        )
+      );
+    }
+
+    console.log("Initializing React app...");
+    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App, null, null));
+  </script>
+
+</body>
+</html>
