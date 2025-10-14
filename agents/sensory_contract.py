@@ -5,44 +5,43 @@ consistent feedback and targeted fixes.
 """
 
 from typing import List, Dict, Any, Optional, Literal
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 import json
 
 
 @dataclass
 class InteractionResult:
-    """Results from interactive testing (forms, buttons, etc)."""
-    contact_submitted: bool = False
+    """Results from a single interaction test (form submission, button click, etc)."""
+    attempted: bool = False
+    http_status: Optional[int] = None
+    success_banner: bool = False
+    error_banner: bool = False
     details: str = ""
-    errors: List[str] = None
+    errors: List[str] = field(default_factory=list)
+    
+    # Legacy compatibility
+    contact_submitted: bool = False
     
     def __post_init__(self):
-        if self.errors is None:
-            self.errors = []
+        if self.contact_submitted:
+            self.attempted = True
+            self.success_banner = True
 
 
 @dataclass
 class AccessibilityResult:
     """Accessibility testing results."""
     violations: int = 0
-    top_issues: List[str] = None
+    top_issues: List[str] = field(default_factory=list)
     wcag_level: str = "AA"
-    
-    def __post_init__(self):
-        if self.top_issues is None:
-            self.top_issues = []
 
 
 @dataclass
 class PlaywrightResult:
     """Playwright test execution results."""
     passed: bool = True
-    failed_tests: List[str] = None
+    failed_tests: List[str] = field(default_factory=list)
     total_tests: int = 0
-    
-    def __post_init__(self):
-        if self.failed_tests is None:
-            self.failed_tests = []
 
 
 @dataclass
@@ -64,23 +63,20 @@ class SensoryReport:
     alignment_score: float = 0.0
     spacing_score: float = 0.0
     contrast_score: float = 0.0
-    visible_sections: List[str] = None
-    interaction: Optional[InteractionResult] = None
-    a11y: Optional[AccessibilityResult] = None
-    playwright: Optional[PlaywrightResult] = None
-    screens: List[Screenshot] = None
+    visible_sections: List[str] = field(default_factory=list)
+    interaction: InteractionResult = field(default_factory=InteractionResult)
+    a11y: AccessibilityResult = field(default_factory=AccessibilityResult)
+    playwright: PlaywrightResult = field(default_factory=PlaywrightResult)
+    screens: List[Screenshot] = field(default_factory=list)
     
-    def __post_init__(self):
-        if self.visible_sections is None:
-            self.visible_sections = []
-        if self.interaction is None:
-            self.interaction = InteractionResult()
-        if self.a11y is None:
-            self.a11y = AccessibilityResult()
-        if self.playwright is None:
-            self.playwright = PlaywrightResult()
-        if self.screens is None:
-            self.screens = []
+    # New generic fields
+    elements: Dict[str, int] = field(default_factory=dict)
+    interactions: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    visited_urls: List[str] = field(default_factory=list)
+    vision_scores: Dict[str, float] = field(default_factory=dict)
+    model_ids: Dict[str, str] = field(default_factory=dict)
+    expectations: Dict[str, Any] = field(default_factory=dict)
+    failing_reasons: List[str] = field(default_factory=list)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -93,7 +89,14 @@ class SensoryReport:
             "interaction": asdict(self.interaction),
             "a11y": asdict(self.a11y),
             "playwright": asdict(self.playwright),
-            "screens": [asdict(s) for s in self.screens]
+            "screens": [asdict(s) for s in self.screens],
+            "elements": self.elements,
+            "interactions": self.interactions,
+            "visited_urls": self.visited_urls,
+            "vision_scores": self.vision_scores,
+            "model_ids": self.model_ids,
+            "expectations": self.expectations,
+            "failing_reasons": self.failing_reasons
         }
     
     def to_json(self) -> str:

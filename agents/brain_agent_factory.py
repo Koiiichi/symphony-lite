@@ -18,7 +18,7 @@ from dataclasses import dataclass
 class BrainConfig:
     """Configuration for Brain agent instances."""
     model_type: str = "LiteLLMModel"
-    model_id: str = "gpt-4o"
+    model_id: str = "gpt-5-nano"
     provider: Optional[str] = None
     api_base: Optional[str] = None
     api_key: Optional[str] = None
@@ -26,6 +26,14 @@ class BrainConfig:
     temperature: float = 0.7
     verbosity: int = 1
     timeout: int = 180  # seconds for operations
+
+
+@dataclass
+class SensoryConfig:
+    """Configuration for Sensory agent."""
+    model_id: str = "gpt-4o"
+    headless: bool = True
+    timeout: int = 120
 
 
 def validate_path_safety(project_root: pathlib.Path, target_path: str) -> pathlib.Path:
@@ -146,11 +154,28 @@ def create_brain_agent(
             Newline-separated list of relative file paths
         """
         try:
+            # Handle simple patterns that need expansion
+            if pattern == "*":
+                pattern = "*.*"
+            elif pattern == "**":
+                pattern = "**/*.*"
+            
             files = []
-            for path in project_root.glob(pattern):
-                if path.is_file():
-                    rel_path = path.relative_to(project_root)
-                    files.append(str(rel_path))
+            # Exclude common directories
+            exclude_patterns = {'.git', 'venv', 'node_modules', '__pycache__', '.venv', 'artifacts', 'drivers'}
+            
+            # Use rglob for recursive patterns
+            if pattern.startswith("**/"):
+                search_pattern = pattern[3:]  # Remove "**/"
+                for path in project_root.rglob(search_pattern):
+                    if path.is_file() and not any(part in exclude_patterns for part in path.parts):
+                        rel_path = path.relative_to(project_root)
+                        files.append(str(rel_path))
+            else:
+                for path in project_root.glob(pattern):
+                    if path.is_file() and not any(part in exclude_patterns for part in path.parts):
+                        rel_path = path.relative_to(project_root)
+                        files.append(str(rel_path))
             
             if not files:
                 return f"No files found matching pattern: {pattern}"
@@ -208,7 +233,6 @@ def create_brain_agent(
     model = load_model(config.model_type, config.model_id, **model_kwargs)
     
     # Create agent with project-scoped tools
-    # Note: CodeAgent doesn't support verbosity parameter directly
     # Agent name must be a valid Python identifier (no hyphens)
     agent_name = f"BrainAgent_{_run_id.replace('-', '_')}"
     agent = CodeAgent(
@@ -217,9 +241,6 @@ def create_brain_agent(
         name=agent_name,
         max_steps=config.max_steps
     )
-    
-    # Store verbosity level as agent attribute for logging control
-    agent.verbosity = config.verbosity
     
     return agent
 

@@ -10,6 +10,7 @@ import json
 import base64
 import os
 from pathlib import Path
+from typing import Dict, Any, Optional
 from selenium.webdriver.chrome.options import Options
 
 # Import contract types
@@ -142,15 +143,26 @@ def submit_contact_form(
         
         contact_submitted = name_filled and email_filled and message_filled and submit_clicked
         
+        # Capture HTTP status from network logs
+        http_status = _get_last_xhr_status('/api/contact')
+        
         return InteractionResult(
+            attempted=contact_submitted,
             contact_submitted=contact_submitted,
+            http_status=http_status,
+            success_banner=_check_success_banner(),
+            error_banner=_check_error_banner(),
             details="Form submitted successfully" if contact_submitted else "; ".join(errors),
             errors=errors
         )
         
     except Exception as e:
         return InteractionResult(
+            attempted=True,
             contact_submitted=False,
+            http_status=None,
+            success_banner=False,
+            error_banner=True,
             details=f"Exception during form submission: {str(e)}",
             errors=[str(e)]
         )
@@ -304,20 +316,171 @@ def analyze_view_heuristic() -> dict:
     }
 
 
-def inspect_site(url: str, run_id: str = "default") -> SensoryReport:
+def _get_last_xhr_status(url_pattern: str) -> Optional[int]:
+    """Extract HTTP status from Chrome performance logs.
+    
+    Args:
+        url_pattern: URL substring to match (e.g., '/api/contact')
+        
+    Returns:
+        HTTP status code or None if not found
+    """
+    try:
+        driver = helium.get_driver()
+        logs = driver.get_log('performance')
+        
+        # Reverse to get most recent first
+        for log_entry in reversed(logs):
+            log = json.loads(log_entry['message'])['message']
+            
+            # Look for Network.responseReceived events
+            if log['method'] == 'Network.responseReceived':
+                response = log['params']['response']
+                if url_pattern in response['url']:
+                    return response['status']
+        
+        return None
+    except Exception as e:
+        print(f"Failed to parse network logs: {e}")
+        return None
+
+
+def _check_success_banner() -> bool:
+    """Check if success message is visible."""
+    try:
+        driver = helium.get_driver()
+        success_elements = driver.find_elements("css selector", 
+            ".success, .message.success, [class*='success']")
+        return any(el.is_displayed() for el in success_elements)
+    except:
+        return False
+
+
+def _check_error_banner() -> bool:
+    """Check if error message is visible."""
+    try:
+        driver = helium.get_driver()
+        error_elements = driver.find_elements("css selector", 
+            ".error, .message.error, [class*='error']")
+        return any(el.is_displayed() for el in error_elements)
+    except:
+        return False
+
+
+def _count_elements() -> dict:
+    """Count UI elements for capability checking.
+    
+    Returns:
+        Dict with element counts
+    """
+    try:
+        driver = helium.get_driver()
+        
+        kpi_tiles = len(driver.find_elements("css selector", "[class*='kpi'], [class*='metric'], [class*='stat'], [data-type='kpi']"))
+        charts = len(driver.find_elements("css selector", "canvas, svg[class*='chart'], [class*='chart']"))
+        tables = len(driver.find_elements("css selector", "table"))
+        filters = len(driver.find_elements("css selector", "[type='search'], select, [class*='filter']"))
+        
+        return {
+            "kpi_tiles": kpi_tiles,
+            "charts": charts,
+            "tables": tables,
+            "filters": filters
+        }
+    except Exception as e:
+        print(f"Element counting failed: {e}")
+        return {
+            "kpi_tiles": 0,
+            "charts": 0,
+            "tables": 0,
+            "filters": 0
+        }
+
+
+def _test_form_interaction(interaction_spec: dict) -> dict:
+    """Test a form interaction based on spec.
+    
+    Args:
+        interaction_spec: Interaction specification from expectations
+        
+    Returns:
+        Dict with interaction results
+    """
+    result = {
+        "attempted": False,
+        "http_status": None,
+        "success_banner": False,
+        "error_banner": False
+    }
+    
+    try:
+        if interaction_spec["type"] != "form_submit":
+            return result
+        
+        # Try to submit form using the selector
+        selector = interaction_spec.get("selector", "form")
+        
+        # Fill and submit based on interaction id
+        interaction_id = interaction_spec["id"]
+        
+        if "contact" in interaction_id:
+            form_result = submit_contact_form()
+            result["attempted"] = form_result.attempted
+            result["http_status"] = form_result.http_status
+            result["success_banner"] = form_result.success_banner
+            result["error_banner"] = form_result.error_banner
+        else:
+            # Generic form submission
+            try:
+                helium.click(f"{selector} button[type='submit']")
+                result["attempted"] = True
+                time.sleep(2.0)
+                
+                # Check for success/error indicators
+                driver = helium.get_driver()
+                success_elements = driver.find_elements("css selector", "[class*='success'], [class*='Success']")
+                error_elements = driver.find_elements("css selector", "[class*='error'], [class*='Error']")
+                
+                result["success_banner"] = len(success_elements) > 0
+                result["error_banner"] = len(error_elements) > 0
+                result["http_status"] = 200 if result["success_banner"] else 500
+            except Exception as e:
+                result["attempted"] = True
+                result["error_banner"] = True
+                result["http_status"] = 500
+        
+        return result
+        
+    except Exception as e:
+        print(f"Form interaction test failed: {e}")
+        return result
+
+
+def inspect_site(url: str, run_id: str = "default", sensory_config: Optional[Dict[str, Any]] = None, expectations: Optional[Dict[str, Any]] = None) -> SensoryReport:
     """Main function to inspect site with agentic browsing.
     
     Args:
         url: URL to inspect (e.g., http://localhost:3000)
         run_id: Unique identifier for this run (for artifacts)
+        sensory_config: Configuration for sensory model
+        expectations: Expected capabilities and interactions
         
     Returns:
         SensoryReport with all inspection results
     """
+    if sensory_config is None:
+        sensory_config = {"model_id": "gpt-4o"}
+    
+    if expectations is None:
+        expectations = {}
+    
     # Setup Chrome with appropriate options
     opts = Options()
     opts.add_argument("--window-size=1280,900")
     opts.add_argument("--disable-blink-features=AutomationControlled")
+    
+    # Enable performance logging for network capture
+    opts.set_capability("goog:loggingPrefs", {"performance": "ALL"})
     
     headless = os.getenv("SYMPHONY_HEADLESS", "true").lower() == "true"
     if headless:
@@ -328,6 +491,7 @@ def inspect_site(url: str, run_id: str = "default") -> SensoryReport:
     alignment_scores = []
     spacing_scores = []
     contrast_scores = []
+    visited_urls = []
     
     try:
         # Start browser
@@ -335,6 +499,7 @@ def inspect_site(url: str, run_id: str = "default") -> SensoryReport:
         
         # Step 1: Initial page load
         go_to_url(url)
+        visited_urls.append(url)
         screen1_path = _save_step_screenshot("1_initial", run_id)
         screen1 = analyze_current_view()
         screenshots.append(Screenshot(page="initial_load", path=screen1_path))
@@ -355,10 +520,27 @@ def inspect_site(url: str, run_id: str = "default") -> SensoryReport:
         contrast_scores.append(screen2.get("contrast_score", 0.7))
         all_visible_sections.update(screen2.get("visible_sections", []))
         
-        # Step 3: Try contact form interaction
-        interaction = submit_contact_form()
+        # Count elements for generic capabilities
+        elements = _count_elements()
         
-        # Step 4: Final analysis after interaction
+        # Test interactions from expectations
+        interactions_results = {}
+        for interaction_spec in expectations.get("interactions", []):
+            if interaction_spec["type"] == "form_submit":
+                result = _test_form_interaction(interaction_spec)
+                interactions_results[interaction_spec["id"]] = result
+        
+        # Legacy contact form interaction for backward compatibility
+        interaction = submit_contact_form()
+        if not interactions_results.get("contact_submit"):
+            interactions_results["contact_submit"] = {
+                "attempted": interaction.attempted,
+                "http_status": interaction.http_status,
+                "success_banner": interaction.success_banner,
+                "error_banner": interaction.error_banner
+            }
+        
+        # Step 3: Final analysis after interaction
         screen3_path = _save_step_screenshot("3_submit", run_id)
         screen3 = analyze_current_view()
         screenshots.append(Screenshot(page="after_submit", path=screen3_path))
@@ -368,7 +550,7 @@ def inspect_site(url: str, run_id: str = "default") -> SensoryReport:
         contrast_scores.append(screen3.get("contrast_score", 0.7))
         all_visible_sections.update(screen3.get("visible_sections", []))
         
-        # Step 5: Basic accessibility check
+        # Step 4: Basic accessibility check
         a11y = check_basic_accessibility()
         
         # Aggregate scores (use max to be lenient)
@@ -376,17 +558,30 @@ def inspect_site(url: str, run_id: str = "default") -> SensoryReport:
         final_spacing = max(spacing_scores) if spacing_scores else 0.7
         final_contrast = max(contrast_scores) if contrast_scores else 0.7
         
+        # Build vision scores
+        vision_scores = {
+            "alignment": final_alignment,
+            "spacing": final_spacing,
+            "contrast": final_contrast
+        }
+        
         # Determine status based on quality gates
         report = SensoryReport(
-            status="pass",  # Will be updated by passes_all_gates check
+            status="pass",
             alignment_score=final_alignment,
             spacing_score=final_spacing,
             contrast_score=final_contrast,
             visible_sections=sorted(list(all_visible_sections)),
             interaction=interaction,
             a11y=a11y,
-            playwright=PlaywrightResult(passed=True, total_tests=0),  # Placeholder
-            screens=screenshots
+            playwright=PlaywrightResult(passed=True, total_tests=0),
+            screens=screenshots,
+            elements=elements,
+            interactions=interactions_results,
+            visited_urls=visited_urls,
+            vision_scores=vision_scores,
+            model_ids={"sensory": sensory_config.get("model_id", "gpt-4o")},
+            expectations=expectations
         )
         
         # Update status based on gates

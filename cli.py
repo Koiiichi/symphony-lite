@@ -36,11 +36,13 @@ def run(
     fe_port: int = typer.Option(3000, "--fe-port", help="Frontend server port"),
     be_port: int = typer.Option(5000, "--be-port", help="Backend server port"),
     steps: int = typer.Option(3, "--steps", help="Max test-and-fix passes (1=quick, 3=standard, 5=thorough)"),
-    brain_model: str = typer.Option("gpt-4o", "--brain-model", help="Model ID for Brain agent (e.g., gpt-4o, claude-3-opus)"),
+    brain_model: str = typer.Option("gpt-5-nano", "--brain-model", help="Model ID for Brain agent (e.g., gpt-5-nano, gpt-4o, claude-3-opus)"),
+    sensory_model: str = typer.Option("gpt-4o", "--sensory-model", help="Model ID for Sensory agent (e.g., gpt-4o)"),
     open_browser: bool = typer.Option(False, "--open", help="Auto-open browser on successful completion"),
     temperature: float = typer.Option(0.7, "--temperature", help="Model temperature (0.0-1.0)"),
     max_agent_steps: int = typer.Option(15, "--max-agent-steps", help="Maximum steps for Brain agent per generation"),
     verbosity: int = typer.Option(1, "--verbosity", help="Agent verbosity level (0=silent, 1=normal, 2=verbose)"),
+    expectations: Optional[str] = typer.Option(None, "--expectations", help="Path to JSON file with expectations (bypasses LLM goal interpretation)"),
 ):
     """Run the agentic build-test-repair loop on any project folder.
     
@@ -66,7 +68,7 @@ def run(
     
     # Import orchestrator and config
     from orchestrator import run_workflow
-    from agents.brain_agent_factory import BrainConfig
+    from agents.brain_agent_factory import BrainConfig, SensoryConfig
     
     project_path = str(pathlib.Path(project).resolve())
     
@@ -88,12 +90,18 @@ def run(
         verbosity=verbosity
     )
     
+    # Create Sensory config
+    sensory_config = SensoryConfig(
+        model_id=sensory_model
+    )
+    
     console.print(Panel.fit(
         f"[bold cyan]Project:[/bold cyan] {project_path}\n"
         f"[bold cyan]Goal:[/bold cyan] {goal}\n"
         f"[bold cyan]Ports:[/bold cyan] Frontend: {fe_port}, Backend: {be_port}\n"
         f"[bold cyan]Max Passes:[/bold cyan] {steps} test-and-fix iterations\n"
         f"[bold cyan]Brain Model:[/bold cyan] {brain_model}\n"
+        f"[bold cyan]Sensory Model:[/bold cyan] {sensory_model}\n"
         f"[bold cyan]Browser:[/bold cyan] {'Will open on success' if open_browser else 'Will not open'}",
         title="Symphony-Lite Workflow"
     ))
@@ -107,22 +115,26 @@ def run(
             be_port,
             steps,
             brain_config=brain_config,
-            open_browser=open_browser
+            sensory_config=sensory_config,
+            open_browser=open_browser,
+            expectations_file=expectations
         )
         
-        # Print results
+        # Print results and set exit code
+        exit_code = result.get("exit_code", 1)
+        
         if result.get("final_status") == "success":
             console.print("\n[bold green]Workflow completed successfully![/bold green]")
-            raise typer.Exit(0)
+            raise typer.Exit(exit_code)
         elif result.get("final_status") == "completed_max_iterations":
             console.print("\n[bold yellow]Workflow completed all iterations.[/bold yellow]")
             console.print("[dim]Consider running again with more --steps for further refinement[/dim]")
-            raise typer.Exit(0)
+            raise typer.Exit(exit_code)
         else:
             console.print("\n[bold red]Workflow completed with issues.[/bold red]")
             if "error" in result:
                 console.print(f"[red]Error: {result['error']}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(exit_code)
             
     except KeyboardInterrupt:
         console.print("\n[yellow]Workflow interrupted by user[/yellow]")

@@ -1,6 +1,7 @@
 """Orchestrator - Coordinates Brain, Runner, and Sensory agents.
 
 Refactored to use Brain agent factory for isolated, project-scoped instances.
+Uses capability-based expectations and pluggable gate engine.
 """
 
 from rich.console import Console
@@ -16,9 +17,11 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 
 # Import new factory and contract
-from agents.brain_agent_factory import create_brain_agent, BrainConfig, detect_existing_stack
+from agents.brain_agent_factory import create_brain_agent, BrainConfig, SensoryConfig, detect_existing_stack
 from agents.sensory_contract import SensoryReport
-from agents.brain_instructions import get_generation_instructions, get_fix_instructions
+from agents.brain_instructions import get_generation_instructions
+from agents.goal_interpreter import build_expectations
+from gates.engine import evaluate as evaluate_gates, get_fix_instructions as get_gate_fix_instructions
 from runner import run_servers
 from agents.sensory_agent import inspect_site
 
@@ -32,8 +35,10 @@ def run_workflow(
     be_port: int,
     steps: int = 3,
     brain_config: Optional[BrainConfig] = None,
+    sensory_config: Optional['SensoryConfig'] = None,
     run_id: Optional[str] = None,
-    open_browser: bool = False
+    open_browser: bool = False,
+    expectations_file: Optional[str] = None
 ) -> Dict[str, Any]:
     """Run the complete agentic workflow with clean, non-conflicting output.
     
@@ -58,6 +63,9 @@ def run_workflow(
     # Use default config if not provided
     if brain_config is None:
         brain_config = BrainConfig()
+    
+    if sensory_config is None:
+        sensory_config = SensoryConfig()
     
     # Ensure project path is absolute
     project_path = str(Path(project_path).resolve())
@@ -103,6 +111,11 @@ def run_workflow(
                 f"Found {stack.get('frontend', 'unknown')} frontend, {stack.get('backend', 'unknown')} backend ({frameworks})")
     else:
         log_step("Stack Detection", "complete", "Empty project - will scaffold")
+    
+    # Build expectations from goal
+    log_step("Goal Interpretation", "running", "Deriving expectations from goal")
+    expectations = build_expectations(goal, page_type_hint=None, stack=stack, expectations_file=expectations_file)
+    log_step("Goal Interpretation", "complete", f"Expectations: {len(expectations.get('capabilities', {}))} capabilities, {len(expectations.get('interactions', []))} interactions")
     
     # Create Brain agent instance for this run
     log_step("Brain Agent", "running", "Creating project-scoped agent")
@@ -161,19 +174,31 @@ def run_workflow(
         # Sensory pass
         log_step("Sensory Testing", "running", f"Testing application (pass {step_num} of {steps})")
         try:
-            report: SensoryReport = inspect_site(frontend_url, run_id)
+            sensory_model_config = {"model_id": sensory_config.model_id}
+            report: SensoryReport = inspect_site(frontend_url, run_id, sensory_model_config, expectations)
             
-            failing_gates = report.get_failing_gates()
+            # Evaluate gates
+            gate_result = evaluate_gates(expectations, report.to_dict())
+            report.failing_reasons = gate_result["failing_reasons"]
             
             log_step("Sensory Testing", "complete",
                     f"Alignment: {report.alignment_score:.2f}, "
                     f"Spacing: {report.spacing_score:.2f}, "
-                    f"Contrast: {report.contrast_score:.2f}, "
-                    f"Form: {'PASS' if report.interaction.contact_submitted else 'FAIL'} "
+                    f"Contrast: {report.contrast_score:.2f} "
                     f"(pass {step_num} of {steps})")
             
-            if failing_gates:
-                console.print(f"[yellow]Failing gates: {', '.join(failing_gates)}[/yellow]")
+            if gate_result["failing_reasons"]:
+                console.print(f"[yellow]Failing gates: {', '.join(gate_result['failing_reasons'])}[/yellow]")
+            
+            # Add model IDs to report
+            report.model_ids["brain"] = brain_config.model_id
+            report.model_ids["sensory"] = sensory_config.model_id
+            
+            # Save report to artifacts
+            artifacts_dir = Path("artifacts") / run_id
+            artifacts_dir.mkdir(parents=True, exist_ok=True)
+            with open(artifacts_dir / "report.json", "w") as f:
+                json.dump(report.to_dict(), f, indent=2)
             
             summary["passes"][f"pass_{step_num}"] = report.to_dict()
             summary["steps_completed"] = step_num
@@ -185,7 +210,7 @@ def run_workflow(
             break
         
         # Check if we should stop
-        if report.passes_all_gates():
+        if gate_result["passed"]:
             log_step("Quality Gates", "success", f"All gates passed after {step_num} of {steps} passes!")
             summary["final_status"] = "success"
             break
@@ -194,8 +219,24 @@ def run_workflow(
         if step_num < steps:
             log_step("Applying Fixes", "running", f"Generating improvements (pass {step_num} of {steps})")
             try:
-                fix_instructions = get_fix_instructions(project_path, report, goal)
-                brain.run(fix_instructions)
+                fix_instructions = get_gate_fix_instructions(expectations, report.to_dict(), gate_result["failing_reasons"])
+                full_instructions = f"""
+You are fixing issues in the project at: {project_path}
+
+ORIGINAL GOAL:
+{goal}
+
+{fix_instructions}
+
+PROCESS:
+1. Use list_project_files() to see the current structure
+2. Use read_existing_code() to examine files that need changes
+3. Apply targeted fixes using write_code()
+4. Ensure all changes are consistent with the existing stack
+
+Start by examining the relevant files.
+"""
+                brain.run(full_instructions)
                 log_step("Applying Fixes", "complete", f"Improvements applied (pass {step_num} of {steps})")
                 time.sleep(3)  # Give time for file changes to take effect
             except Exception as e:
@@ -228,30 +269,60 @@ def run_workflow(
         artifacts_path = Path("artifacts") / run_id
         screenshots_count = len(final_report.screens)
         
-        status_emoji = "SUCCESS" if final_report.passes_all_gates() else "NEEDS WORK"
-        status_color = "green" if final_report.passes_all_gates() else "yellow"
+        gate_result = evaluate_gates(expectations, final_report.to_dict())
+        passed_all = gate_result["passed"]
+        
+        status_emoji = "SUCCESS" if passed_all else "NEEDS WORK"
+        status_color = "green" if passed_all else "yellow"
+        
+        # Build panel lines
+        panel_lines = [
+            f"[bold {status_color}]{status_emoji}[/bold {status_color}]\n",
+            f"[cyan]URL:[/cyan] {frontend_url}",
+            f"[cyan]Status:[/cyan] {final_report.status}",
+            f"[cyan]Alignment:[/cyan] {final_report.alignment_score:.2f} / 0.90",
+            f"[cyan]Spacing:[/cyan] {final_report.spacing_score:.2f} / 0.90",
+            f"[cyan]Contrast:[/cyan] {final_report.contrast_score:.2f} / 0.75",
+        ]
+        
+        # Add interaction results
+        for interaction_id, interaction_data in final_report.interactions.items():
+            attempted = interaction_data.get("attempted", False)
+            http_status = interaction_data.get("http_status", "N/A")
+            success = interaction_data.get("success_banner", False)
+            error = interaction_data.get("error_banner", False)
+            
+            if attempted:
+                status_str = "ok" if (http_status and 200 <= http_status < 300 and success and not error) else "fail"
+                panel_lines.append(f"[cyan]{interaction_id}:[/cyan] {status_str} (status={http_status})")
+        
+        panel_lines.extend([
+            f"[cyan]Visible Sections:[/cyan] {', '.join(final_report.visible_sections) or 'none'}",
+            f"[cyan]Artifacts:[/cyan] {artifacts_path}",
+            f"[cyan]Screenshots:[/cyan] {screenshots_count} saved",
+            f"[cyan]Models:[/cyan] Brain: {final_report.model_ids.get('brain', 'N/A')}, Sensory: {final_report.model_ids.get('sensory', 'N/A')}",
+            "",
+            "[dim]Next steps:[/dim]",
+            f"[dim]- Review artifacts in {artifacts_path}[/dim]",
+            f"[dim]- Check report.json for full details[/dim]",
+        ])
+        
+        if not passed_all:
+            panel_lines.append(f"[dim]- Run again with --steps {steps + 2} for more refinement[/dim]")
+        
+        panel_lines.append("[dim]- Use --open to auto-open browser on success[/dim]")
         
         console.print()
-        console.print(Panel.fit(
-            f"[bold {status_color}]{status_emoji}[/bold {status_color}]\n\n"
-            f"[cyan]URL:[/cyan] {frontend_url}\n"
-            f"[cyan]Status:[/cyan] {final_report.status}\n"
-            f"[cyan]Alignment:[/cyan] {final_report.alignment_score:.2f} / 0.90\n"
-            f"[cyan]Spacing:[/cyan] {final_report.spacing_score:.2f} / 0.90\n"
-            f"[cyan]Contrast:[/cyan] {final_report.contrast_score:.2f} / 0.75\n"
-            f"[cyan]Form Working:[/cyan] {'Yes' if final_report.interaction.contact_submitted else 'No'}\n"
-            f"[cyan]Visible Sections:[/cyan] {', '.join(final_report.visible_sections) or 'none'}\n"
-            f"[cyan]Artifacts:[/cyan] {artifacts_path}\n"
-            f"[cyan]Screenshots:[/cyan] {screenshots_count} saved\n\n"
-            f"[dim]Next steps:[/dim]\n"
-            f"[dim]- Review artifacts in {artifacts_path}[/dim]\n"
-            f"[dim]- Run again with --steps {steps + 2} for more refinement[/dim]\n"
-            f"[dim]- Use --open to auto-open browser on success[/dim]",
-            title=f"Run {run_id} Complete"
-        ))
+        console.print(Panel.fit("\n".join(panel_lines), title=f"Run {run_id} Complete"))
         
         summary["final_report"] = final_report.to_dict()
         summary["artifacts_path"] = str(artifacts_path)
+        
+        # Set exit code based on gate result
+        if not passed_all:
+            summary["exit_code"] = 1
+        else:
+            summary["exit_code"] = 0
     
     return summary
 
