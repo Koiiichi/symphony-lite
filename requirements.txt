@@ -1,0 +1,18 @@
+# Core dependencies for Symphony-Lite
+typer==0.9.0
+rich==13.7.0
+smolagents>=0.2.0
+openai>=1.0.0
+python-dotenv>=1.0.0
+
+# Web automation dependencies
+helium>=3.0.0
+selenium>=4.15.0
+
+# Optional: for enhanced capabilities
+requests>=2.31.0
+pathlib2>=2.3.0  # for older Python versions if needed
+
+# Development/testing (optional)
+# playwright>=1.40.0  # Install separately for testing
+# pytest>=7.0.0      # Install separately for testing
