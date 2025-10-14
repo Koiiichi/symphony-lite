@@ -20,22 +20,22 @@ Autonomous AI-powered web application development framework. Uses natural langua
 
 ## Installation
 
-\`\`\`bash
+```bash
 git clone <repository-url>
 cd symphony-lite
-\`\`\`
+````
 
-Create \`.env\` file:
+Create a `.env` file:
 
-\`\`\`env
+```env
 OPENAI_API_KEY=your_api_key_here
-\`\`\`
+```
 
 First run automatically creates virtual environment and installs dependencies:
 
-\`\`\`bash
+```bash
 python symphony.py run --project <path> --goal "<description>"
-\`\`\`
+```
 
 ## Usage
 
@@ -43,75 +43,75 @@ python symphony.py run --project <path> --goal "<description>"
 
 **Run workflow:**
 
-\`\`\`bash
+```bash
 python symphony.py run --project PATH --goal "DESCRIPTION"
-\`\`\`
+```
 
 **Validate project structure:**
 
-\`\`\`bash
+```bash
 python symphony.py validate --project PATH
-\`\`\`
+```
 
 **System information:**
 
-\`\`\`bash
+```bash
 python symphony.py info
-\`\`\`
+```
 
 ### CLI Options
 
 #### Required Parameters
 
-- \`--project PATH\` - Target project directory (existing or new)
-- \`--goal TEXT\` - Natural language description of desired application
+* `--project PATH` - Target project directory (existing or new)
+* `--goal TEXT` - Natural language description of desired application
 
 #### Server Configuration
 
-- \`--fe-port INT\` - Frontend server port (default: 3000)
-- \`--be-port INT\` - Backend server port (default: 5000)
+* `--fe-port INT` - Frontend server port (default: 3000)
+* `--be-port INT` - Backend server port (default: 5000)
 
 #### Workflow Control
 
-- \`--steps INT\` - Maximum test-and-fix iterations (default: 3, range: 1-5)
-- \`--max-agent-steps INT\` - Brain agent step limit per generation (default: 15)
-- \`--verbosity INT\` - Logging level: 0=quiet, 1=normal, 2=verbose (default: 1)
+* `--steps INT` - Maximum test-and-fix iterations (default: 3, range: 1-5)
+* `--max-agent-steps INT` - Brain agent step limit per generation (default: 15)
+* `--verbosity INT` - Logging level: 0=quiet, 1=normal, 2=verbose (default: 1)
 
 #### Model Configuration
 
-- \`--brain-model TEXT\` - LLM model identifier (default: gpt-4o)
-  - Supported: gpt-4o, gpt-4-turbo, claude-3-opus, claude-3-sonnet
-- \`--temperature FLOAT\` - Model temperature 0.0-1.0 (default: 0.7)
+* `--brain-model TEXT` - LLM model identifier (default: gpt-4o)
+  Supported: gpt-4o, gpt-4-turbo, claude-3-opus, claude-3-sonnet
+* `--temperature FLOAT` - Model temperature 0.0-1.0 (default: 0.7)
 
 #### User Interface
 
-- \`--open\` - Auto-open browser on successful completion
+* `--open` - Auto-open browser on successful completion
 
 ### Examples
 
 **Create new portfolio from scratch:**
 
-\`\`\`bash
+```bash
 python symphony.py run --project portfolio --goal "Professional portfolio with dark theme and contact form"
-\`\`\`
+```
 
 **Enhance existing application:**
 
-\`\`\`bash
+```bash
 python symphony.py run --project projects/dashboard --goal "Add user authentication with JWT tokens"
-\`\`\`
+```
 
 **Use alternative model:**
 
-\`\`\`bash
+```bash
 python symphony.py run --project app --goal "E-commerce cart" --brain-model claude-3-opus --temperature 0.5
-\`\`\`
+```
 
 **Quick iteration:**
 
-\`\`\`bash
+```bash
 python symphony.py run --project app --goal "Fix mobile responsiveness" --steps 1 --open
-\`\`\`
+```
 
 ## Architecture
 
@@ -119,46 +119,46 @@ python symphony.py run --project app --goal "Fix mobile responsiveness" --steps 
 
 **Brain Agent**
 
-- Generates code using LLM (smolagents CodeAgent)
-- Factory-based instantiation with project-scoped tools
-- Closured file operations with path traversal protection
-- Supports multiple LLM providers via LiteLLM
+* Generates code using LLM (smolagents CodeAgent)
+* Factory-based instantiation with project-scoped tools
+* Closured file operations with path traversal protection
+* Supports multiple LLM providers via LiteLLM
 
 **Sensory Agent**
 
-- Automated browser testing using Helium/Selenium
-- Visual analysis via GPT-4o Vision
-- Form interaction testing
-- Basic accessibility validation
-- Returns structured SensoryReport dataclass
+* Automated browser testing using Helium/Selenium
+* Visual analysis via GPT-4o Vision
+* Form interaction testing
+* Basic accessibility validation
+* Returns structured `SensoryReport` dataclass
 
 **Runner**
 
-- Manages frontend (HTTP server) and backend (Flask) processes
-- Server readiness polling with timeout handling
-- Graceful shutdown and cleanup
-- Isolated dependency installation per project
+* Manages frontend (HTTP server) and backend (Flask) processes
+* Server readiness polling with timeout handling
+* Graceful shutdown and cleanup
+* Isolated dependency installation per project
 
 ### Quality Gates
 
 Applications must pass these thresholds before completion:
 
-| Gate | Threshold | Description |
-|------|-----------|-------------|
-| Alignment | >= 0.90 | Visual layout consistency |
-| Spacing | >= 0.90 | Whitespace uniformity |
-| Contrast | >= 0.75 | WCAG AA text contrast |
-| Form | Working | Contact form submission |
-| Accessibility | <= 5 violations | Basic a11y compliance |
-| Playwright | All Pass | E2E tests (if present) |
+| Gate          | Threshold       | Description               |
+| ------------- | --------------- | ------------------------- |
+| Alignment     | >= 0.90         | Visual layout consistency |
+| Spacing       | >= 0.90         | Whitespace uniformity     |
+| Contrast      | >= 0.75         | WCAG AA text contrast     |
+| Form          | Working         | Contact form submission   |
+| Accessibility | <= 5 violations | Basic a11y compliance     |
+| Playwright    | All Pass        | E2E tests (if present)    |
 
-See \`API_CONTRACT.md\` for detailed gate specifications and fix policies.
+See `API_CONTRACT.md` for detailed gate specifications and fix policies.
 
 ### Project Structure
 
 **For existing projects:**
 
-\`\`\`
+```
 project/
 ├── frontend/
 │   ├── index.html
@@ -166,16 +166,16 @@ project/
 ├── backend/
 │   ├── app.py
 │   └── requirements.txt
-\`\`\`
+```
 
 **For new projects:**
 
 Symphony-Lite scaffolds appropriate structure based on goal description. Supports:
 
-- Static HTML/CSS/JS frontends
-- React/Vue/Vite-based SPAs
-- Flask backends with CORS
-- Node.js backends (if detected)
+* Static HTML/CSS/JS frontends
+* React/Vue/Vite-based SPAs
+* Flask backends with CORS
+* Node.js backends (if detected)
 
 ### Communication Protocol
 
@@ -183,7 +183,7 @@ Agents communicate via typed dataclasses:
 
 **SensoryReport** - Sensory agent to Brain agent
 
-\`\`\`python
+```python
 @dataclass
 class SensoryReport:
     status: str  # "pass" | "needs_fix"
@@ -195,11 +195,11 @@ class SensoryReport:
     a11y: AccessibilityResult
     playwright: Optional[PlaywrightResult]
     screens: List[Screenshot]
-\`\`\`
+```
 
 **BrainConfig** - CLI to Brain agent factory
 
-\`\`\`python
+```python
 @dataclass
 class BrainConfig:
     model_type: str = "LiteLLMModel"
@@ -208,51 +208,51 @@ class BrainConfig:
     temperature: float = 0.7
     verbosity: int = 1
     timeout: int = 180
-\`\`\`
+```
 
-See \`API_CONTRACT.md\` for complete protocol specification.
+See `API_CONTRACT.md` for complete protocol specification.
 
 ### Artifact Management
 
 Each run generates isolated artifacts:
 
-\`\`\`
+```
 artifacts/
   run_20251013_143022/
     step_1_initial.png
     step_2_scroll.png
     step_3_submit.png
     report.json
-\`\`\`
+```
 
-Run ID format: \`run_YYYYMMDD_HHMMSS\`
+Run ID format: `run_YYYYMMDD_HHMMSS`
 
 ## Configuration
 
 ### Environment Variables
 
-- \`OPENAI_API_KEY\` - OpenAI API key (required)
-- \`ANTHROPIC_API_KEY\` - Anthropic API key (optional, for Claude models)
+* `OPENAI_API_KEY` - OpenAI API key (required)
+* `ANTHROPIC_API_KEY` - Anthropic API key (optional, for Claude models)
 
 ### Dependencies
 
-Core requirements in \`requirements.txt\`:
+Core requirements in `requirements.txt`:
 
-- typer - CLI framework
-- rich - Terminal formatting
-- smolagents - Agent framework
-- openai - OpenAI API client
-- helium - Browser automation
-- selenium - WebDriver support
-- flask - Backend server
-- flask-cors - CORS handling
-- requests - HTTP client
+* typer - CLI framework
+* rich - Terminal formatting
+* smolagents - Agent framework
+* openai - OpenAI API client
+* helium - Browser automation
+* selenium - WebDriver support
+* flask - Backend server
+* flask-cors - CORS handling
+* requests - HTTP client
 
 ## Development
 
 ### Running Tests
 
-\`\`\`bash
+```bash
 # Test empty folder scaffold
 mkdir test-app && python symphony.py run --project test-app --goal "Simple dashboard"
 
@@ -261,13 +261,13 @@ python symphony.py run --project projects/portfolio --goal "Add testimonials sec
 
 # Test with verbose logging
 python symphony.py run --project test-app --goal "Fix layout" --verbosity 2
-\`\`\`
+```
 
 ### Extending
 
 **Add custom tools to Brain agent:**
 
-\`\`\`python
+```python
 # agents/brain_agent_factory.py
 @tool
 def custom_tool(param: str) -> str:
@@ -276,11 +276,11 @@ def custom_tool(param: str) -> str:
     return result
 
 # Add to tools list in create_brain_agent()
-\`\`\`
+```
 
 **Custom quality gates:**
 
-\`\`\`python
+```python
 # agents/sensory_contract.py
 custom_thresholds = {
     "alignment": 0.95,
@@ -288,24 +288,24 @@ custom_thresholds = {
     "contrast": 0.80
 }
 report.passes_all_gates(custom_thresholds)
-\`\`\`
+```
 
 **Alternative LLM providers:**
 
-\`\`\`bash
+```bash
 # Set provider in config
 python symphony.py run --project app --goal "..." --brain-model "anthropic/claude-3-opus"
-\`\`\`
+```
 
 ## Troubleshooting
 
 **Import errors on first run:**
 
-Delete \`venv/\` directory and run again. Symphony-Lite will recreate environment.
+Delete `venv/` directory and run again. Symphony-Lite will recreate environment.
 
 **Flask/Werkzeug version conflicts:**
 
-Ensure \`requirements.txt\` specifies \`Flask>=2.3.0\` and \`flask-cors>=4.0.0\`
+Ensure `requirements.txt` specifies `Flask>=2.3.0` and `flask-cors>=4.0.0`
 
 **Browser automation failures:**
 
@@ -313,17 +313,17 @@ Verify Chrome/Chromium installed. Helium requires ChromeDriver (auto-downloaded)
 
 **Quality gates failing:**
 
-Use \`--verbosity 2\` to see detailed gate analysis. Check artifacts directory for screenshots.
+Use `--verbosity 2` to see detailed gate analysis. Check artifacts directory for screenshots.
 
 **Concurrent runs interfering:**
 
-Each run uses unique \`run_id\` for isolation. Verify different project paths or manual run_id override.
+Each run uses unique `run_id` for isolation. Verify different project paths or manual run_id override.
 
 ## Documentation
 
-- \`API_CONTRACT.md\` - Sensory-Brain communication protocol
-- \`MIGRATION.md\` - Upgrading from v1.x to v2.0
-- \`LICENSE\` - MIT License
+* `API_CONTRACT.md` - Sensory-Brain communication protocol
+* `MIGRATION.md` - Upgrading from v1.x to v2.0
+* `LICENSE` - MIT License
 
 ## License
 
@@ -333,16 +333,16 @@ MIT License - see LICENSE file for details.
 
 Contributions welcome. Areas for enhancement:
 
-- Additional testing frameworks (Playwright E2E, visual regression)
-- LLM provider integrations (Gemini, local models)
-- Project type templates (Next.js, FastAPI, etc.)
-- Quality gate extensions (performance, security)
+* Additional testing frameworks (Playwright E2E, visual regression)
+* LLM provider integrations (Gemini, local models)
+* Project type templates (Next.js, FastAPI, etc.)
+* Quality gate extensions (performance, security)
 
 ## Acknowledgments
 
 Built with:
 
-- smolagents - Agent framework
-- LiteLLM - Multi-provider LLM interface
-- Helium - Browser automation
-- Rich - Terminal UI
+* smolagents - Agent framework
+* LiteLLM - Multi-provider LLM interface
+* Helium - Browser automation
+* Rich - Terminal UI
