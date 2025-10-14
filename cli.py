@@ -8,7 +8,15 @@ console = Console()
 
 def chroot_to_repo():
     """Ensure we're running from the symphony-lite repo root."""
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    cli_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Check if we're in the right directory (should have orchestrator.py)
+    if not os.path.exists(os.path.join(cli_dir, "orchestrator.py")):
+        console.print("[red]Error: Please use 'python symphony.py' instead of calling cli.py directly[/red]")
+        console.print("[dim]Symphony.py handles virtual environment setup automatically[/dim]")
+        raise typer.Exit(1)
+    
+    os.chdir(cli_dir)
     sys.path.insert(0, os.getcwd())
 
 @app.command()

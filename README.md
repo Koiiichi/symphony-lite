@@ -6,10 +6,11 @@ Describe what you want to build, and Symphony-Lite does the rest. AI agents gene
 
 ## Get Started
 
-Install dependencies and create your environment file:
+Clone Symphony-Lite:
 
 ```bash
-pip install -r requirements.txt
+git clone <repository-url>
+cd symphony-lite
 ```
 
 Create `.env`:
@@ -17,13 +18,13 @@ Create `.env`:
 OPENAI_API_KEY=your_openai_api_key_here
 ```
 
-Build anything:
+Run anything (first run automatically sets up everything):
 
 ```bash
-python cli.py run --project "my-app" --goal "Dark portfolio with contact form"
+python symphony.py run --project "projects/portfolio" --goal "Dark portfolio with contact form"
 ```
 
-That's it. Symphony-Lite handles code generation, server management, visual testing, and iterative improvements.
+That's it. Symphony-Lite automatically handles virtual environments, dependencies, code generation, server management, visual testing, and iterative improvements.
 
 ## How It Works
 
@@ -44,12 +45,12 @@ The system iterates until quality gates are met: visual alignment, working forms
 
 Run the workflow:
 ```bash
-python cli.py run --project PATH --goal "Your description"
+python symphony.py run --project PATH --goal "Your description"
 ```
 
 Validate project structure:
 ```bash
-python cli.py validate --project PATH
+python symphony.py validate --project PATH
 ```
 
 ### Options
@@ -90,18 +91,29 @@ Optional Playwright integration available for advanced testing scenarios.
 
 Portfolio website:
 ```bash
-python cli.py run --project "portfolio" --goal "Professional dark theme with project grid"
+python symphony.py run --project "projects/portfolio" --goal "Professional dark theme with project grid"
 ```
 
 E-commerce landing:
 ```bash
-python cli.py run --project "store" --goal "Product showcase with newsletter signup"
+python symphony.py run --project "projects/ecommerce" --goal "Product showcase with newsletter signup"
 ```
 
 Dashboard interface:
 ```bash
-python cli.py run --project "admin" --goal "Clean data dashboard with responsive tables"
+python symphony.py run --project "projects/dashboard" --goal "Clean data dashboard with responsive tables"
 ```
+
+## Troubleshooting
+
+**"can't open file symphony.py"**  
+Run commands from the symphony-lite root directory, not from project subdirectories.
+
+**"OPENAI_API_KEY not found"**  
+Create a `.env` file with your OpenAI API key.
+
+**Dependencies not installing**  
+Symphony-Lite handles this automatically on first run. If issues persist, delete the `venv` folder and try again.
 
 ## Requirements
 
