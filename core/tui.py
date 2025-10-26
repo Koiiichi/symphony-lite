@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import threading
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -46,14 +49,23 @@ class SymphonyTUI:
         self._live: Optional[Live] = None
         self._active_activity: Optional[str] = None
         self._spinner_style: str = "dots"
+        self._activity_progress: List[str] = []
+        self._heartbeat_interval = 3.0
+        self._heartbeat_text = "…"
+        self._heartbeat_thread: Optional[threading.Thread] = None
+        self._heartbeat_stop: Optional[threading.Event] = None
+        self._start_time = time.monotonic()
 
     @contextmanager
     def live(self):
         with Live(self._render(), console=self.console, refresh_per_second=8, transient=False) as live:
             self._live = live
+            self._start_time = time.monotonic()
+            self._start_heartbeat()
             try:
                 yield self
             finally:
+                self._stop_heartbeat()
                 self._live = None
 
     def set_header(self, **fields: str) -> None:
@@ -78,14 +90,25 @@ class SymphonyTUI:
 
         self._active_activity = text.strip()
         self._spinner_style = SPINNER_MAP.get(spinner, spinner)
+        self._activity_progress = []
         self._refresh()
 
     def stop_activity(self, completion: Optional[str] = None, *, icon: str = "•") -> None:
         self._active_activity = None
+        self._activity_progress = []
         if completion:
             self.add_voice(completion, icon=icon)
         else:
             self._refresh()
+
+    def update_activity_progress(self, detail: str) -> None:
+        if not detail:
+            return
+        self._activity_progress.append(detail)
+        self._refresh()
+
+    def mark_timeout(self, label: str) -> None:
+        self.add_voice(f"{label} – TIMED OUT", icon="[warn]")
 
     def set_footer(self, text: str) -> None:
         self.footer = text
@@ -113,10 +136,14 @@ class SymphonyTUI:
         for status in self.status_lines.values():
             detail = f" – {status.detail}" if status.detail else ""
             status_table.add_row(f"{status.label}: {status.status}{detail}")
+        status_table.add_row(f"Heartbeat: {self._heartbeat_text}")
 
         voice = Table.grid(padding=0)
         if self._active_activity:
-            voice.add_row(Spinner(self._spinner_style, text=self._active_activity))
+            spinner_text = self._active_activity
+            if self._activity_progress:
+                spinner_text += " – " + " | ".join(self._activity_progress[-3:])
+            voice.add_row(Spinner(self._spinner_style, text=spinner_text))
         for line in self.voice_lines[-15:]:
             voice.add_row(line)
 
@@ -138,3 +165,25 @@ class SymphonyTUI:
     def print_detailed(self, text: str) -> None:
         if self.detailed:
             self.console.print(Text(text, style="dim"))
+
+    def _start_heartbeat(self) -> None:
+        if self._heartbeat_thread and self._heartbeat_thread.is_alive():
+            return
+        self._heartbeat_stop = threading.Event()
+
+        def _pulse() -> None:
+            while self._heartbeat_stop and not self._heartbeat_stop.wait(self._heartbeat_interval):
+                elapsed = int(time.monotonic() - self._start_time)
+                self._heartbeat_text = f"{elapsed}s"
+                self._refresh()
+
+        self._heartbeat_thread = threading.Thread(target=_pulse, daemon=True)
+        self._heartbeat_thread.start()
+
+    def _stop_heartbeat(self) -> None:
+        if self._heartbeat_stop:
+            self._heartbeat_stop.set()
+        if self._heartbeat_thread and self._heartbeat_thread.is_alive():
+            self._heartbeat_thread.join(timeout=0.2)
+        self._heartbeat_thread = None
+        self._heartbeat_stop = None

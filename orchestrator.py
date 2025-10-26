@@ -8,7 +8,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from rich.console import Console
 
@@ -31,6 +31,7 @@ from core.types import (
     WorkflowSummary,
 )
 from gates.engine import evaluate as evaluate_gates, get_fix_instructions as build_gate_fix_instructions
+from core.vision_result import VisionResult, parse_vision_payload, write_raw_payload
 
 
 console = Console()
@@ -70,17 +71,28 @@ def _summarize_list(values: Iterable[str], *, limit: int = 4) -> str:
 def _summarize_vision_report(report_data: Dict[str, object]) -> list[str]:
     lines: list[str] = []
 
-    scores = []
-    for key, label in (
-        ("alignment_score", "alignment"),
-        ("spacing_score", "spacing"),
-        ("contrast_score", "contrast"),
-    ):
-        value = report_data.get(key)
-        if isinstance(value, (int, float)):
-            scores.append(f"{label}: {value:.2f}")
-    if scores:
-        lines.append("Scores – " + ", ".join(scores))
+    scores_dict = {}
+    if isinstance(report_data.get("scores"), dict):
+        scores_dict = report_data["scores"]  # type: ignore[assignment]
+    elif isinstance(report_data.get("vision_scores"), dict):
+        scores_dict = report_data["vision_scores"]  # type: ignore[assignment]
+    else:
+        for key, label in (
+            ("alignment_score", "alignment"),
+            ("spacing_score", "spacing"),
+            ("contrast_score", "contrast"),
+        ):
+            value = report_data.get(key)
+            if isinstance(value, (int, float)):
+                scores_dict[label] = value
+    if scores_dict:
+        score_bits = []
+        for key in ("alignment", "spacing", "contrast"):
+            value = scores_dict.get(key)
+            if isinstance(value, (int, float)):
+                score_bits.append(f"{key}: {value:.2f}")
+        if score_bits:
+            lines.append("Scores – " + ", ".join(score_bits))
 
     sections = report_data.get("visible_sections")
     if isinstance(sections, Iterable) and not isinstance(sections, (str, bytes)):
@@ -94,40 +106,26 @@ def _summarize_vision_report(report_data: Dict[str, object]) -> list[str]:
         if visited_list:
             lines.append("Visited – " + _summarize_list(visited_list, limit=3))
 
-    elements = report_data.get("elements")
-    if isinstance(elements, dict):
-        element_bits = []
-        for key, label in (
-            ("kpi_tiles", "KPIs"),
-            ("charts", "charts"),
-            ("tables", "tables"),
-            ("filters", "filters"),
-        ):
-            value = elements.get(key)
-            if isinstance(value, (int, float)):
-                element_bits.append(f"{label}: {int(value)}")
-        if element_bits:
-            lines.append("Elements – " + ", ".join(element_bits))
+    interactions = report_data.get("interactions")
+    if isinstance(interactions, dict):
+        for key, meta in interactions.items():
+            if not isinstance(meta, dict):
+                continue
+            status = "ok" if meta.get("ok") else "not attempted" if not meta.get("attempted") else "fail"
+            selector = meta.get("selector")
+            detail = meta.get("notes")
+            text = f"Interaction – {key}: {status}"
+            if selector:
+                text += f" ({selector})"
+            if detail:
+                text += f" – {detail}"
+            lines.append(text)
 
-    interaction = report_data.get("interaction")
-    if isinstance(interaction, dict):
-        interaction_bits = []
-        details = interaction.get("details")
-        if details:
-            interaction_bits.append(str(details))
-        status = interaction.get("http_status")
-        if status:
-            interaction_bits.append(f"HTTP {status}")
-        if interaction.get("errors"):
-            interaction_bits.append("errors detected")
-        if interaction_bits:
-            lines.append("Interaction – " + "; ".join(interaction_bits))
-
-    a11y = report_data.get("a11y")
+    a11y = report_data.get("accessibility") or report_data.get("a11y")
     if isinstance(a11y, dict):
         violations = a11y.get("violations")
         if isinstance(violations, int):
-            wcag_level = a11y.get("wcag_level")
+            wcag_level = a11y.get("target") or a11y.get("wcag_level")
             text = f"Accessibility – {violations} violation{'s' if violations != 1 else ''}"
             if wcag_level:
                 text += f", target: {wcag_level}"
@@ -139,7 +137,92 @@ def _summarize_vision_report(report_data: Dict[str, object]) -> list[str]:
         if warn_list:
             lines.append("Warnings – " + "; ".join(warn_list))
 
+    issues = report_data.get("issues")
+    if isinstance(issues, Iterable):
+        for issue in issues:
+            if isinstance(issue, dict) and issue.get("detail"):
+                lines.append(f"Issue – {issue.get('id', 'unknown')}: {issue['detail']}")
+
     return lines
+
+
+def _build_preview_hints(expectations: Dict[str, Any], mode: str) -> Dict[str, List[str]]:
+    selectors: List[str] = []
+    keywords: List[str] = []
+    if mode == "qa":
+        for interaction in expectations.get("interactions", []):
+            if not isinstance(interaction, dict):
+                continue
+            selector = interaction.get("selector")
+            if selector:
+                selectors.append(str(selector))
+        if selectors:
+            keywords.append("form")
+    else:
+        keywords.extend(["section", "header", "hero"])
+    return {"selectors": selectors, "keywords": keywords}
+
+
+def _sensory_to_vision_payload(
+    report: SensoryReport,
+    *,
+    mode: str,
+    url: str,
+) -> Dict[str, Any]:
+    data = report.to_dict()
+    interactions_payload: List[Dict[str, Any]] = []
+    interactions = data.get("interactions", {})
+    if isinstance(interactions, dict):
+        for key, value in interactions.items():
+            if not isinstance(value, dict):
+                continue
+            attempted = bool(value.get("attempted"))
+            success = bool(value.get("success_banner")) and not value.get("error_banner")
+            notes = value.get("details") or ""
+            errors = value.get("errors")
+            if errors and isinstance(errors, list):
+                notes = "; ".join(str(err) for err in errors if err)
+            interactions_payload.append(
+                {
+                    "id": key,
+                    "action": value.get("action", "form_submit"),
+                    "selector": value.get("selector"),
+                    "ok": attempted and success,
+                    "notes": notes or None,
+                    "attempted": attempted,
+                }
+            )
+    warnings = data.get("warnings") if isinstance(data.get("warnings"), list) else []
+    issues = []
+    for warning in warnings or []:
+        issues.append({"id": "warning", "status": "warn", "detail": str(warning)})
+    for reason in data.get("failing_reasons", []):
+        issues.append({"id": "gate_failure", "status": "fail", "detail": str(reason)})
+
+    return {
+        "version": "1.0",
+        "target_url": url,
+        "mode": mode,
+        "scores": {
+            "alignment": data.get("alignment_score"),
+            "spacing": data.get("spacing_score"),
+            "contrast": data.get("contrast_score"),
+        },
+        "accessibility": {
+            "violations": data.get("a11y", {}).get("violations") if isinstance(data.get("a11y"), dict) else None,
+            "target": data.get("a11y", {}).get("wcag_level") if isinstance(data.get("a11y"), dict) else "AA",
+        },
+        "interactions": interactions_payload,
+        "issues": issues,
+        "suggestions": [],
+        "artifacts": {
+            "screenshots": [
+                screen.get("path")
+                for screen in data.get("screens", [])
+                if isinstance(screen, dict) and screen.get("path")
+            ]
+        },
+    }
 
 
 def _format_success_message(goal: str, intent: Optional[IntentResult], summary: WorkflowSummary) -> str:
@@ -171,10 +254,10 @@ def _format_stalled_message(failing_reasons: list[str]) -> str:
     if failing_reasons:
         issues = ", ".join(failing_reasons)
         return (
-            "Run stopped because the same issues kept resurfacing: "
+            "Run stopped because no progress was observed across 2 passes: "
             f"{issues}. Address them manually and try again."
         )
-    return "Run stopped because progress stalled. Review the latest output and try again."
+    return "Run stopped because progress stalled across multiple passes. Review the latest output and try again."
 
 
 def _format_max_passes_message(failing_reasons: Optional[list[str]]) -> str:
@@ -193,6 +276,7 @@ class DefaultAgentHooks(AgentHooks):
     brain_config: BrainConfig
     sensory_config: SensoryConfig
     run_id: str
+    vision_mode: str
     _brain_logs: Dict[int, str] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -221,8 +305,14 @@ class DefaultAgentHooks(AgentHooks):
     def consume_brain_log(self, pass_index: int) -> Optional[str]:
         return self._brain_logs.pop(pass_index, None)
 
-    def run_vision(self, url: str, expectations: Dict[str, object], *, pass_index: int):
-        report: SensoryReport = inspect_site(url, self.run_id, {"model_id": self.sensory_config.model_id}, expectations)
+    def run_vision(self, url: str, expectations: Dict[str, object], *, pass_index: int, mode: str):
+        report: SensoryReport = inspect_site(
+            url,
+            self.run_id,
+            {"model_id": self.sensory_config.model_id},
+            expectations,
+            mode=mode,
+        )
         return report
 
 
@@ -275,6 +365,7 @@ def run_workflow(
                 Mode="detecting…",
                 Passes=config.max_passes,
                 Run=run_id,
+                Vision=config.vision_mode,
             )
 
             tui.update_status("Stack Detection", "RUNNING")
@@ -300,6 +391,7 @@ def run_workflow(
                 Mode=f"{detected_intent.intent} ({detected_intent.topic})",
                 Passes=config.max_passes,
                 Run=run_id,
+                Vision=config.vision_mode,
             )
 
             tui.add_voice("Analyzing project and classifying intent…")
@@ -326,8 +418,11 @@ def run_workflow(
 
             tui.update_status("Servers", "STARTING")
             tui.start_activity("Spooling up local services…", spinner="pulsing_star")
+            preferred_kind = None
+            if detected_intent and detected_intent.topic == "ui_ux":
+                preferred_kind = "frontend"
             try:
-                urls = server_manager.start_all()
+                urls = server_manager.start_all(preferred_kind=preferred_kind)
             except TimeoutError as exc:
                 tui.stop_activity("Server startup timed out", icon="[warn]")
                 summary.status = "error"
@@ -346,21 +441,19 @@ def run_workflow(
                 tui.stop_activity("Local services ready", icon="[ready]")
             tui.update_status("Servers", "READY", detail=", ".join(f"{k}: {v}" for k, v in urls.items()))
             summary.urls = urls
-            frontend_url = urls.get("frontend") or detected_stack.frontend_url
-            backend_url = urls.get("backend") or detected_stack.backend_url
-
-            preview_url = frontend_url or backend_url
-            if backend_url and (not detected_stack.frontend or detected_stack.frontend == "static"):
-                preview_url = backend_url
-            elif not preview_url and backend_url:
-                preview_url = backend_url
-
-            keep_servers_running = config.open_browser and bool(preview_url)
-
-            hooks = hooks or DefaultAgentHooks(project_path, brain_config, sensory_config, run_id)
+            hooks = hooks or DefaultAgentHooks(
+                project_path,
+                brain_config,
+                sensory_config,
+                run_id,
+                config.vision_mode,
+            )
 
             expectations = build_expectations(
-                config.goal, page_type_hint=None, stack=_stack_to_dict(detected_stack)
+                config.goal,
+                page_type_hint=None,
+                stack=_stack_to_dict(detected_stack),
+                vision_mode=config.vision_mode,
             )
             tui.update_status(
                 "Expectations",
@@ -368,7 +461,44 @@ def run_workflow(
                 detail=f"{len(expectations.get('capabilities', {}))} capabilities",
             )
 
-            last_report: Optional[SensoryReport] = None
+            hints = _build_preview_hints(expectations, config.vision_mode)
+            selection = server_manager.resolve_preview_surface(
+                run_id=run_id,
+                preferred_kind=preferred_kind,
+                hints=hints,
+            )
+            if selection.artifacts:
+                for key, path in selection.artifacts.items():
+                    summary.artifacts[f"server_{Path(path).name}"] = path
+            if selection.message:
+                tui.add_sub_info(selection.message)
+
+            preview_url = selection.url
+            if selection.probe and selection.probe.is_blank:
+                summary.status = "error"
+                final_message = (
+                    "Preview surface rendered a blank document. Review captured diagnostics before retrying."
+                )
+                summary.final_message = final_message
+                tui.set_footer(final_message)
+                if selection.artifacts:
+                    tui.add_sub_info(
+                        "Artifacts: " + ", ".join(selection.artifacts.values())
+                    )
+                keep_servers_running = False
+                return summary
+
+            if not preview_url:
+                summary.status = "error"
+                final_message = selection.message or "No reachable preview surface after server startup."
+                summary.final_message = final_message
+                tui.set_footer(final_message)
+                keep_servers_running = False
+                return summary
+
+            keep_servers_running = config.open_browser and bool(preview_url)
+
+            last_report: Optional[VisionResult] = None
             last_failures: Optional[list[str]] = None
             stagnation_counter = 0
 
@@ -404,13 +534,39 @@ def run_workflow(
                             f"Vision: {step.description}…",
                             spinner="pulsing_star",
                         )
-                        report = hooks.run_vision(vision_url, expectations, pass_index=index)
+                        tui.update_activity_progress(f"mode: {config.vision_mode}")
+                        tui.update_activity_progress("breakpoints: 360 | 768 | 1280")
+                        pass_report = None
+                        raw_report = hooks.run_vision(
+                            vision_url,
+                            expectations,
+                            pass_index=index,
+                            mode=config.vision_mode,
+                        )
                         tui.stop_activity("Vision: Audit complete", icon="[vision]")
-                        if isinstance(report, SensoryReport):
-                            pass_report = report
-                            report_data = report.to_dict()
+                        if isinstance(raw_report, SensoryReport):
+                            pass_report = raw_report
+                            payload = _sensory_to_vision_payload(
+                                raw_report, mode=config.vision_mode, url=vision_url
+                            )
                         else:
-                            report_data = report
+                            payload = raw_report
+                        vision_result, parse_warnings = parse_vision_payload(
+                            payload,
+                            url=vision_url,
+                            mode=config.vision_mode,
+                        )
+                        report_data = vision_result.to_observations()
+                        if parse_warnings:
+                            report_data.setdefault("warnings", []).extend(parse_warnings)
+                            artifact_payload = (
+                                payload.to_dict() if hasattr(payload, "to_dict") else payload
+                            )
+                            artifact_path = write_raw_payload(run_id, index, artifact_payload)
+                            summary.artifacts[f"vision_raw_pass_{index}"] = str(artifact_path)
+                            tui.add_sub_info(
+                                "Vision output invalid; using fallback parser"
+                            )
                         for info_line in _summarize_vision_report(report_data or {}):
                             tui.add_sub_info(info_line)
                         gate_result = evaluate_gates(expectations, report_data)
@@ -444,6 +600,7 @@ def run_workflow(
                             success = True
                             keep_servers_running = config.open_browser and bool(preview_url)
                             break
+                        last_report = vision_result
                     elif step.agent == "brain":
                         if pending_handoff:
                             message, icon = pending_handoff
@@ -458,8 +615,12 @@ def run_workflow(
                             )
                         else:
                             report_for_fix = pass_report or last_report
-                            if isinstance(report_for_fix, SensoryReport):
-                                report_dict = report_for_fix.to_dict()
+                            if isinstance(report_for_fix, VisionResult):
+                                report_dict = report_for_fix.to_observations()
+                            elif isinstance(report_for_fix, SensoryReport):
+                                report_dict = _sensory_to_vision_payload(
+                                    report_for_fix, mode=config.vision_mode, url=vision_url
+                                )
                             else:
                                 report_dict = report_for_fix or {}
                             instructions = build_gate_fix_instructions(
@@ -476,6 +637,7 @@ def run_workflow(
                             f"Brain: {step.description}…",
                             spinner="orbit",
                         )
+                        tui.update_activity_progress("computing patches")
                         hooks.run_brain(instructions, pass_index=index)
                         brain_log = hooks.consume_brain_log(pass_index=index)
                         if brain_log:

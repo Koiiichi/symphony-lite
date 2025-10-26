@@ -89,6 +89,7 @@ class WorkflowConfig:
     open_browser: bool = True
     dry_run: bool = False
     detailed_log: bool = False
+    vision_mode: str = "hybrid"
     run_id: Optional[str] = None
 
 
@@ -99,7 +100,14 @@ class AgentHooks:
     def run_brain(self, instructions: str, *, pass_index: int) -> Dict[str, Any]:
         raise NotImplementedError
 
-    def run_vision(self, url: str, expectations: Dict[str, Any], *, pass_index: int) -> Dict[str, Any]:
+    def run_vision(
+        self,
+        url: str,
+        expectations: Dict[str, Any],
+        *,
+        pass_index: int,
+        mode: str,
+    ) -> Dict[str, Any]:
         raise NotImplementedError
 
     def consume_brain_log(self, pass_index: int) -> Optional[str]:  # pragma: no cover - optional hook

@@ -30,6 +30,7 @@ if hasattr(typer, "testing"):
 from core.intent import classify_intent
 from core.spinners import ensure_bw_spinners
 from core.stack import analyze_project
+from core.config_store import get_section, update_section
 from core.types import WorkflowConfig
 from orchestrator import run_workflow
 
@@ -46,10 +47,12 @@ def _resolve_project_path(path: Optional[Path]) -> Path:
 def _execute(
     description: str,
     project: Optional[Path],
-    open_browser: bool,
-    max_passes: int,
+    *,
+    open_browser: Optional[bool],
+    max_passes: Optional[int],
+    vision_mode: Optional[str],
     dry_run: bool,
-    detailed_log: bool,
+    detailed_log: Optional[bool],
 ) -> None:
     project_path = _resolve_project_path(project)
 
@@ -69,13 +72,33 @@ def _execute(
         if not proceed:
             raise typer.Exit(1)
 
+    stored_cli = get_section(project_path, "cli_options")
+    effective_open_browser = (
+        open_browser
+        if open_browser is not None
+        else bool(stored_cli.get("open_browser", True))
+    )
+    effective_max_passes = max_passes or int(stored_cli.get("max_passes", 3))
+    effective_detailed_log = (
+        detailed_log
+        if detailed_log is not None
+        else bool(stored_cli.get("detailed_log", False))
+    )
+    normalized_mode = (vision_mode or stored_cli.get("vision_mode") or "hybrid").lower()
+    if normalized_mode not in {"visual", "hybrid", "qa"}:
+        raise typer.BadParameter(
+            "--vision-mode must be one of: visual, hybrid, qa",
+            param_name="vision_mode",
+        )
+
     config = WorkflowConfig(
         project_path=project_path,
         goal=description,
-        max_passes=max_passes,
-        open_browser=open_browser,
+        max_passes=effective_max_passes,
+        open_browser=effective_open_browser,
         dry_run=dry_run,
-        detailed_log=detailed_log,
+        detailed_log=effective_detailed_log,
+        vision_mode=normalized_mode,
     )
 
     console.print(f"> {description}")
@@ -114,6 +137,17 @@ def _execute(
         preview_lines = ", ".join(f"{kind}: {url}" for kind, url in summary.urls.items())
         console.print(f"Preview URLs: {preview_lines}")
 
+    update_section(
+        project_path,
+        "cli_options",
+        {
+            "vision_mode": normalized_mode,
+            "open_browser": effective_open_browser,
+            "max_passes": effective_max_passes,
+            "detailed_log": effective_detailed_log,
+        },
+    )
+
     if status == "dry_run":
         raise typer.Exit(0)
 
@@ -134,10 +168,29 @@ main = typer.Typer()
 def run(
     description: str = typer.Argument(..., help="Goal or request for Symphony"),
     project: Optional[Path] = typer.Option(None, "--project", help="Target project directory"),
-    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open browser when the run succeeds"),
-    max_passes: int = typer.Option(3, "--max-passes", min=1, help="Maximum refinement passes"),
+    open_browser: Optional[bool] = typer.Option(
+        None,
+        "--open/--no-open",
+        help="Open browser when the run succeeds",
+    ),
+    max_passes: Optional[int] = typer.Option(
+        None,
+        "--max-passes",
+        min=1,
+        help="Maximum refinement passes",
+    ),
+    vision_mode: Optional[str] = typer.Option(
+        None,
+        "--vision-mode",
+        help="Vision sweep behaviour: visual | hybrid | qa",
+        case_sensitive=False,
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Plan routing without running agents"),
-    detailed_log: bool = typer.Option(False, "--detailed-log", help="Print extended logs to stderr"),
+    detailed_log: Optional[bool] = typer.Option(
+        None,
+        "--detailed-log/--concise-log",
+        help="Print extended logs to stderr",
+    ),
 ) -> None:
     """Execute Symphony on an existing or new project."""
 
@@ -146,6 +199,7 @@ def run(
         project=project,
         open_browser=open_browser,
         max_passes=max_passes,
+        vision_mode=vision_mode,
         dry_run=dry_run,
         detailed_log=detailed_log,
     )

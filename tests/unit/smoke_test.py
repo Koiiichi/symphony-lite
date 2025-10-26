@@ -45,7 +45,7 @@ goals = [
 ]
 
 for goal in goals:
-    exp = build_expectations(goal)
+    exp = build_expectations(goal, vision_mode="qa")
     print(f"   Goal: {goal[:40]}")
     print(f"     Capabilities: KPI={exp['capabilities']['kpi_tiles']['min']}, "
           f"Charts={exp['capabilities']['charts']['min']}, "
@@ -150,7 +150,7 @@ def get_exit_code(expectations, observations):
     result = evaluate_gates(expectations, observations)
     return 0 if result["passed"] else 1
 
-exp_contact = build_expectations("Contact page accepts messages")
+exp_contact = build_expectations("Contact page accepts messages", vision_mode="qa")
 
 obs_broken = {
     "elements": {"kpi_tiles": 0, "charts": 0, "tables": 0, "filters": 0},
@@ -201,7 +201,7 @@ page_types = [
 ]
 
 for page_type, goal in page_types:
-    exp = build_expectations(goal)
+    exp = build_expectations(goal, vision_mode="qa")
     obs = {
         "elements": {"kpi_tiles": 0, "charts": 0, "tables": 0, "filters": 0},
         "interactions": {},

@@ -18,7 +18,8 @@ def test_goal_interpreter():
     expectations = build_expectations(
         "Analytics dashboard with 3 KPI tiles, a chart and a table",
         page_type_hint=None,
-        stack=None
+        stack=None,
+        vision_mode="qa",
     )
     print("\n1. Dashboard Goal:")
     print(json.dumps(expectations, indent=2))
@@ -30,7 +31,8 @@ def test_goal_interpreter():
     expectations = build_expectations(
         "Contact page accepts messages",
         page_type_hint=None,
-        stack=None
+        stack=None,
+        vision_mode="qa",
     )
     print("\n2. Contact Form Goal:")
     print(json.dumps(expectations, indent=2))
@@ -41,7 +43,8 @@ def test_goal_interpreter():
     expectations = build_expectations(
         "Beautiful landing page with hero section",
         page_type_hint=None,
-        stack=None
+        stack=None,
+        vision_mode="qa",
     )
     print("\n3. Landing Page Goal:")
     print(json.dumps(expectations, indent=2))
@@ -157,7 +160,7 @@ def test_integration():
     print("\n\nTesting Integration...")
     
     # Build expectations for a contact page
-    expectations = build_expectations("Contact page accepts messages")
+    expectations = build_expectations("Contact page accepts messages", vision_mode="qa")
     
     # Simulate broken contact form (like test-broken project)
     observations = {

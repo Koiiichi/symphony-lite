@@ -15,7 +15,7 @@ print("="*60)
 
 # Step 1: Build expectations
 goal = "Contact page accepts messages"
-expectations = build_expectations(goal)
+expectations = build_expectations(goal, vision_mode="qa")
 
 print(f"\nGoal: {goal}")
 print(f"Expectations: {expectations['interactions'][0]['id']}")
@@ -94,7 +94,7 @@ print("DASHBOARD GOAL TEST:")
 print("="*60)
 
 dashboard_goal = "Analytics dashboard with 3 KPI tiles, a chart and a table"
-dashboard_expectations = build_expectations(dashboard_goal)
+dashboard_expectations = build_expectations(dashboard_goal, vision_mode="qa")
 
 print(f"Goal: {dashboard_goal}")
 print(f"Required KPI tiles: {dashboard_expectations['capabilities']['kpi_tiles']['min']}")

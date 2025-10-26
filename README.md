@@ -58,9 +58,10 @@
 
 Common flags:
 * `--open/--no-open` – open the detected URL when the run succeeds (default on).
+* `--vision-mode {visual|hybrid|qa}` – choose between quick screenshot scans, light DOM pokes, or full scripted QA flows (defaults to `hybrid`).
 * `--max-passes <int>` – limit refinement cycles (default 3).
 * `--dry-run` – preview routing, stack detection, and safety prompts without running agents.
-* `--detailed-log` – show expanded trace summaries in the terminal UI.
+* `--detailed-log/--concise-log` – toggle expanded trace summaries in the terminal UI.
 
 ### What You’ll See
 Symphony now keeps the terminal lively from the moment you launch a run. You’ll see a monochrome spinner during the quick
@@ -83,6 +84,7 @@ preflight checks, followed by a richer activity feed once the orchestration UI a
 │          frontend: http://localhost:8000/index.html      │
 │ Expectations: READY – 4 capabilities                     │
 │ Pass: 1/3 – running                                      │
+│ Heartbeat: 42s                                           │
 └──────────────────────────────────────────────────────────┘
 ┌────────────────────── Activity ──────────────────────────┐
 │ • Analyzing project and classifying intent…              │

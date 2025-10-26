@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .config_store import load_config, update_section
 from .types import StackInfo, StartCommand
 
 _DEFAULT_FRONTEND_PORTS = {
@@ -23,24 +24,6 @@ _DEFAULT_BACKEND_PORTS = {
     "django": 8000,
     "express": 3000,
 }
-
-_CONFIG_FILE = ".symphony.json"
-
-
-def _load_config(root: Path) -> Dict[str, Dict[str, str]]:
-    config_path = root / _CONFIG_FILE
-    if config_path.exists():
-        try:
-            return json.loads(config_path.read_text())
-        except json.JSONDecodeError:
-            return {}
-    return {}
-
-
-def _save_config(root: Path, data: Dict[str, Dict[str, str]]) -> None:
-    config_path = root / _CONFIG_FILE
-    config_path.write_text(json.dumps(data, indent=2))
-
 
 def _detect_package_json(root: Path) -> Optional[Dict[str, object]]:
     package_file = root / "package.json"
@@ -97,7 +80,7 @@ def analyze_project(root: Path) -> StackInfo:
     backend_url = None
     notes: List[str] = []
 
-    config = _load_config(root)
+    config = load_config(root)
 
     # Node/Frontend detection
     node_roots: List[Path] = []
@@ -231,7 +214,7 @@ def analyze_project(root: Path) -> StackInfo:
 
 
 def ensure_config_override(root: Path, command: StartCommand) -> None:
-    config = _load_config(root)
+    config = load_config(root)
     start_cfg = config.setdefault("start_commands", {})
     key = command.description or command.kind
     start_cfg[key] = {
@@ -242,7 +225,7 @@ def ensure_config_override(root: Path, command: StartCommand) -> None:
         "url": command.url,
         "description": command.description,
     }
-    _save_config(root, config)
+    update_section(root, "start_commands", start_cfg)
 
 
 def _python_executable() -> str:

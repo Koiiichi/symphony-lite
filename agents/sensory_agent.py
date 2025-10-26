@@ -525,7 +525,14 @@ def _test_form_interaction(interaction_spec: dict) -> dict:
         return result
 
 
-def inspect_site(url: str, run_id: str = "default", sensory_config: Optional[Dict[str, Any]] = None, expectations: Optional[Dict[str, Any]] = None) -> SensoryReport:
+def inspect_site(
+    url: str,
+    run_id: str = "default",
+    sensory_config: Optional[Dict[str, Any]] = None,
+    expectations: Optional[Dict[str, Any]] = None,
+    *,
+    mode: str = "hybrid",
+) -> SensoryReport:
     """Main function to inspect site with agentic browsing.
     
     Args:
@@ -597,20 +604,25 @@ def inspect_site(url: str, run_id: str = "default", sensory_config: Optional[Dic
         
         # Test interactions from expectations
         interactions_results = {}
-        for interaction_spec in expectations.get("interactions", []):
-            if interaction_spec["type"] == "form_submit":
-                result = _test_form_interaction(interaction_spec)
-                interactions_results[interaction_spec["id"]] = result
-        
-        # Legacy contact form interaction for backward compatibility
-        interaction = submit_contact_form()
-        if not interactions_results.get("contact_submit"):
-            interactions_results["contact_submit"] = {
-                "attempted": interaction.attempted,
-                "http_status": interaction.http_status,
-                "success_banner": interaction.success_banner,
-                "error_banner": interaction.error_banner
-            }
+        if mode.lower() == "qa":
+            for interaction_spec in expectations.get("interactions", []):
+                if interaction_spec["type"] == "form_submit":
+                    result = _test_form_interaction(interaction_spec)
+                    interactions_results[interaction_spec["id"]] = result
+
+            # Legacy contact form interaction for backward compatibility
+            interaction = submit_contact_form()
+            if not interactions_results.get("contact_submit"):
+                interactions_results["contact_submit"] = {
+                    "attempted": interaction.attempted,
+                    "http_status": interaction.http_status,
+                    "success_banner": interaction.success_banner,
+                    "error_banner": interaction.error_banner,
+                    "errors": interaction.errors,
+                    "notes": interaction.details,
+                }
+        else:
+            warnings.append("Interactive checks skipped in non-qa vision mode")
         
         # Step 3: Final analysis after interaction
         screen3_path = _save_step_screenshot("3_submit", run_id)
@@ -705,7 +717,7 @@ def make_sensory_agent():
                 match = re.search(r'https?://localhost:\d+', instruction)
                 if match:
                     url = match.group(0)
-                    report = inspect_site(url)
+                    report = inspect_site(url, mode="hybrid")
                     # Convert to legacy dict format
                     return report.to_dict()
             return {"error": "Please provide a localhost URL to inspect"}
