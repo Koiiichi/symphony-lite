@@ -12,6 +12,19 @@ from rich.text import Text
 from rich.spinner import Spinner
 
 
+from .spinners import ensure_bw_spinners
+
+
+ensure_bw_spinners()
+
+SPINNER_MAP = {
+    "pulsing_star": "pulsing_star_bw",
+    "orbit": "orbit_bw",
+    "dots": "dots",
+    "bouncingBall": "bounce_bw",
+}
+
+
 @dataclass
 class StatusLine:
     label: str
@@ -51,7 +64,7 @@ class SymphonyTUI:
         self.status_lines[label] = StatusLine(label=label, status=status, detail=detail)
         self._refresh()
 
-    def add_voice(self, text: str, *, icon: str = "⏺") -> None:
+    def add_voice(self, text: str, *, icon: str = "•") -> None:
         line = f"{icon} {text.strip()}"
         self.voice_lines.append(line)
         self._refresh()
@@ -64,10 +77,10 @@ class SymphonyTUI:
         """Show a spinner while a long-running step is in progress."""
 
         self._active_activity = text.strip()
-        self._spinner_style = spinner
+        self._spinner_style = SPINNER_MAP.get(spinner, spinner)
         self._refresh()
 
-    def stop_activity(self, completion: Optional[str] = None, *, icon: str = "⏺") -> None:
+    def stop_activity(self, completion: Optional[str] = None, *, icon: str = "•") -> None:
         self._active_activity = None
         if completion:
             self.add_voice(completion, icon=icon)

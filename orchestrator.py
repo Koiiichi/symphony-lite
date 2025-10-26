@@ -92,6 +92,21 @@ def _summarize_vision_report(report_data: Dict[str, object]) -> list[str]:
         if visited_list:
             lines.append("Visited – " + _summarize_list(visited_list, limit=3))
 
+    elements = report_data.get("elements")
+    if isinstance(elements, dict):
+        element_bits = []
+        for key, label in (
+            ("kpi_tiles", "KPIs"),
+            ("charts", "charts"),
+            ("tables", "tables"),
+            ("filters", "filters"),
+        ):
+            value = elements.get(key)
+            if isinstance(value, (int, float)):
+                element_bits.append(f"{label}: {int(value)}")
+        if element_bits:
+            lines.append("Elements – " + ", ".join(element_bits))
+
     interaction = report_data.get("interaction")
     if isinstance(interaction, dict):
         interaction_bits = []
@@ -206,6 +221,9 @@ def run_workflow(
     brain_config: Optional[BrainConfig] = None,
     sensory_config: Optional[SensoryConfig] = None,
     hooks: Optional[AgentHooks] = None,
+    *,
+    stack: Optional[StackInfo] = None,
+    intent: Optional[IntentResult] = None,
 ) -> WorkflowSummary:
     project_path = config.project_path.resolve()
     brain_config = brain_config or BrainConfig()
@@ -214,64 +232,101 @@ def run_workflow(
     run_id = config.run_id or f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     summary = WorkflowSummary()
 
-    stack = analyze_project(project_path)
-    intent = classify_intent(config.goal, stack)
-    plan = build_agent_plan(intent, include_ui_validation=True)
-    agents_needed = required_agents(plan)
-
-    summary.stack = stack
-    summary.intent = intent
-
     tui = SymphonyTUI(detailed=config.detailed_log)
     success = False
     keep_servers_running = False
     preview_url: Optional[str] = None
-    server_manager = ServerManager(stack)
+    detected_stack = stack
+    detected_intent = intent
+    plan = []
+    agents_needed = []
+    server_manager: Optional[ServerManager] = None
 
     try:
         with tui.live():
             tui.set_header(
                 Project=str(project_path),
                 Goal=config.goal,
-                Mode=f"{intent.intent} ({intent.topic})",
+                Mode="detecting…",
                 Passes=config.max_passes,
                 Run=run_id,
             )
 
             tui.update_status("Stack Detection", "RUNNING")
-            time.sleep(0.05)
-            stack_summary = _summarize_stack(stack)
+            tui.start_activity("Scanning project stack…", spinner="pulsing_star")
+            if detected_stack is None:
+                detected_stack = analyze_project(project_path)
+            summary.stack = detected_stack
+            tui.stop_activity("Stack: scan complete", icon="[stack]")
+            stack_summary = _summarize_stack(detected_stack)
             tui.update_status("Stack Detection", "COMPLETE", detail=stack_summary)
 
+            tui.update_status("Intent", "RUNNING")
+            tui.start_activity("Interpreting goal and planning agents…", spinner="orbit")
+            if detected_intent is None:
+                detected_intent = classify_intent(config.goal, detected_stack)
+            plan = build_agent_plan(detected_intent, include_ui_validation=True)
+            agents_needed = required_agents(plan)
+            summary.intent = detected_intent
+            tui.stop_activity("Intent: routing ready", icon="[intent]")
+            tui.set_header(
+                Project=str(project_path),
+                Goal=config.goal,
+                Mode=f"{detected_intent.intent} ({detected_intent.topic})",
+                Passes=config.max_passes,
+                Run=run_id,
+            )
+
             tui.add_voice("Analyzing project and classifying intent…")
-            tui.add_sub_info(f"Detected intent: {intent.intent}, topic: {intent.topic}")
+            tui.add_sub_info(f"Detected intent: {detected_intent.intent}, topic: {detected_intent.topic}")
+            tui.update_status("Intent", "COMPLETE")
 
             if config.dry_run:
                 tui.add_voice("Dry-run mode – no files will be written.")
                 tui.add_sub_info("Agent plan:")
                 for step in plan:
                     tui.add_sub_info(f"{step.agent}: {step.description}")
-                tui.add_sub_info(f"Start commands detected: {len(stack.start_commands)}")
+                tui.add_sub_info(f"Start commands detected: {len(detected_stack.start_commands)}")
                 summary.status = "dry_run"
                 return summary
 
             _require_api_keys(agents_needed)
 
-            if not stack.start_commands:
+            server_manager = ServerManager(detected_stack)
+
+            if not detected_stack.start_commands:
                 tui.add_voice("No start command detected. Requesting manual command…")
                 manual = prompt_for_start_command(config.goal, project_path)
-                stack.start_commands.append(manual)
+                detected_stack.start_commands.append(manual)
 
             tui.update_status("Servers", "STARTING")
-            urls = server_manager.start_all()
+            tui.start_activity("Spooling up local services…", spinner="pulsing_star")
+            try:
+                urls = server_manager.start_all()
+            except TimeoutError as exc:
+                tui.stop_activity("Server startup timed out", icon="[warn]")
+                summary.status = "error"
+                message = str(exc)
+                summary.final_message = message
+                tui.set_footer(message)
+                raise RuntimeError(message) from exc
+            except RuntimeError as exc:
+                tui.stop_activity("Server startup failed", icon="[warn]")
+                summary.status = "error"
+                message = str(exc)
+                summary.final_message = message
+                tui.set_footer(message)
+                raise
+            else:
+                tui.stop_activity("Local services ready", icon="[ready]")
             tui.update_status("Servers", "READY", detail=", ".join(f"{k}: {v}" for k, v in urls.items()))
             summary.urls = urls
-            preview_url = urls.get("frontend") or stack.frontend_url or urls.get("backend")
+            preview_url = urls.get("frontend") or detected_stack.frontend_url or urls.get("backend")
 
             hooks = hooks or DefaultAgentHooks(project_path, brain_config, sensory_config, run_id)
 
             expectations = build_expectations(
-                config.goal, page_type_hint=None, stack=_stack_to_dict(stack)
+                config.goal, page_type_hint=None, stack=_stack_to_dict(detected_stack)
             )
             tui.update_status(
                 "Expectations",
@@ -285,6 +340,12 @@ def run_workflow(
 
             brain_in_plan = any(step.agent == "brain" for step in plan)
 
+            if plan:
+                tui.add_voice(
+                    "Plan ready: "
+                    + " → ".join(f"{step.agent.capitalize()}" for step in plan)
+                )
+
             for index in range(1, config.max_passes + 1):
                 tui.update_status("Pass", f"{index}/{config.max_passes}", detail="running")
                 changes_made = False
@@ -295,12 +356,17 @@ def run_workflow(
                 for step_idx, step in enumerate(plan):
                     remaining_steps = plan[step_idx + 1 :]
                     if step.agent == "vision":
-                        vision_url = preview_url or urls.get("frontend") or stack.frontend_url
+                        vision_url = (
+                            preview_url or urls.get("frontend") or detected_stack.frontend_url
+                        )
                         if not vision_url:
                             raise RuntimeError("Vision agent requires a frontend URL")
-                        tui.start_activity(f"Vision: {step.description}…", spinner="bouncingBall")
+                        tui.start_activity(
+                            f"Vision: {step.description}…",
+                            spinner="pulsing_star",
+                        )
                         report = hooks.run_vision(vision_url, expectations, pass_index=index)
-                        tui.stop_activity("Vision: Audit complete", icon="👁")
+                        tui.stop_activity("Vision: Audit complete", icon="[vision]")
                         if isinstance(report, SensoryReport):
                             pass_report = report
                             report_data = report.to_dict()
@@ -320,7 +386,7 @@ def run_workflow(
                                     f"Vision ⇢ Brain: Sharing {issue_count} finding"
                                     f"{'s' if issue_count != 1 else ''} for fixes."
                                 )
-                                tui.add_voice(handoff, icon="⇢")
+                                tui.add_voice(handoff, icon="->")
                         else:
                             tui.add_sub_info("Issues: none")
                             pass_outcome = PassOutcome(
@@ -332,7 +398,7 @@ def run_workflow(
                             )
                             summary.add_pass(pass_outcome)
                             summary.status = "success"
-                            final_message = _format_success_message(config.goal, intent, summary)
+                            final_message = _format_success_message(config.goal, detected_intent, summary)
                             summary.final_message = final_message
                             tui.set_footer(final_message)
                             success = True
@@ -343,7 +409,7 @@ def run_workflow(
                             instructions = get_generation_instructions(
                                 str(project_path),
                                 config.goal,
-                                _stack_to_dict(stack),
+                                _stack_to_dict(detected_stack),
                             )
                         else:
                             report_for_fix = pass_report or last_report
@@ -361,9 +427,12 @@ def run_workflow(
                                 f"Goal: {config.goal}\n\n"
                                 f"{instructions}\n"
                             )
-                        tui.start_activity(f"Brain: {step.description}…", spinner="dots")
+                        tui.start_activity(
+                            f"Brain: {step.description}…",
+                            spinner="orbit",
+                        )
                         hooks.run_brain(instructions, pass_index=index)
-                        tui.stop_activity("Brain: Applied targeted fixes", icon="🧠")
+                        tui.stop_activity("Brain: Applied targeted fixes", icon="[brain]")
                         changes_made = True
                         tui.add_sub_info("Applied targeted fixes")
                         has_follow_up_vision = any(
@@ -372,7 +441,7 @@ def run_workflow(
                         if has_follow_up_vision:
                             tui.add_voice(
                                 "Brain ⇢ Vision: Updates ready for validation.",
-                                icon="⇠",
+                                icon="<-",
                             )
 
                 if pass_outcome is None:
@@ -408,10 +477,10 @@ def run_workflow(
                 summary.final_message = final_message
                 tui.set_footer(final_message)
     finally:
-        if not keep_servers_running:
+        if not keep_servers_running and server_manager:
             server_manager.stop_all()
 
-    if keep_servers_running and preview_url:
+    if keep_servers_running and preview_url and server_manager:
         try:
             import webbrowser
 
