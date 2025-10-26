@@ -24,13 +24,16 @@ ENV/
 Thumbs.db
 
 # Artifacts and logs
+artifacts/run_*/
 artifacts/*.png
 artifacts/*.jpg
 artifacts/*.log
 !artifacts/.gitkeep
+*.backup
 
 # Backend messages
 projects/*/backend/messages.txt
 
 # Node modules (if any)
 node_modules/
+package-lock.json
