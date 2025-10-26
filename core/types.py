@@ -101,3 +101,6 @@ class AgentHooks:
 
     def run_vision(self, url: str, expectations: Dict[str, Any], *, pass_index: int) -> Dict[str, Any]:
         raise NotImplementedError
+
+    def consume_brain_log(self, pass_index: int) -> Optional[str]:  # pragma: no cover - optional hook
+        return None

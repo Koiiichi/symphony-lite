@@ -29,5 +29,5 @@ def test_create_brain_agent_missing_litellm(monkeypatch, tmp_path: Path) -> None
 
     message = str(excinfo.value)
     assert "litellm" in message
-    assert "pip install \"smolagents[litellm]\"" in message
+    assert "pip install litellm" in message
     assert f"\"{sys.executable}\"" in message

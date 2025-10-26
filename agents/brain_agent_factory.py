@@ -261,7 +261,10 @@ def create_brain_agent(
 
         dependency = missing or "required dependency"
         if dependency == "litellm":
-            install_hint = f"\"{sys.executable}\" -m pip install \"smolagents[litellm]\""
+            python_cmd = f"\"{sys.executable}\" -m pip install litellm"
+            install_hint = (
+                f"{python_cmd} (or reinstall smolagents with the litellm extra inside this interpreter)"
+            )
         elif missing:
             install_hint = f"\"{sys.executable}\" -m pip install {dependency}"
         else:

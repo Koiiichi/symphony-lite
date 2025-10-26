@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 import sys
 import time
-from dataclasses import dataclass
+import io
+from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, Optional
@@ -185,6 +187,7 @@ class DefaultAgentHooks(AgentHooks):
     brain_config: BrainConfig
     sensory_config: SensoryConfig
     run_id: str
+    _brain_logs: Dict[int, str] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._brain_agent = None
@@ -195,7 +198,22 @@ class DefaultAgentHooks(AgentHooks):
 
     def run_brain(self, instructions: str, *, pass_index: int):
         self._ensure_brain()
-        return self._brain_agent.run(instructions)
+        stdout_buffer = io.StringIO()
+        stderr_buffer = io.StringIO()
+        with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+            result = self._brain_agent.run(instructions)
+
+        combined_output = "".join(
+            part for part in (stdout_buffer.getvalue(), stderr_buffer.getvalue()) if part
+        )
+
+        if combined_output.strip():
+            self._brain_logs[pass_index] = combined_output
+
+        return result
+
+    def consume_brain_log(self, pass_index: int) -> Optional[str]:
+        return self._brain_logs.pop(pass_index, None)
 
     def run_vision(self, url: str, expectations: Dict[str, object], *, pass_index: int):
         report: SensoryReport = inspect_site(url, self.run_id, {"model_id": self.sensory_config.model_id}, expectations)
@@ -241,6 +259,7 @@ def run_workflow(
     plan = []
     agents_needed = []
     server_manager: Optional[ServerManager] = None
+    brain_log_notice_shown = False
 
     try:
         with tui.live():
@@ -432,6 +451,17 @@ def run_workflow(
                             spinner="orbit",
                         )
                         hooks.run_brain(instructions, pass_index=index)
+                        brain_log = hooks.consume_brain_log(pass_index=index)
+                        if brain_log:
+                            summary.artifacts[f"brain_pass_{index}_log"] = brain_log
+                            if config.detailed_log:
+                                for line in brain_log.strip().splitlines():
+                                    tui.add_sub_info(f"[brain-log] {line}")
+                            elif not brain_log_notice_shown:
+                                tui.add_sub_info(
+                                    "Brain agent output captured; rerun with --detailed-log to view the transcript."
+                                )
+                                brain_log_notice_shown = True
                         tui.stop_activity("Brain: Applied targeted fixes", icon="[brain]")
                         changes_made = True
                         tui.add_sub_info("Applied targeted fixes")

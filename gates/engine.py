@@ -261,12 +261,17 @@ def get_fix_instructions(
         
         elif any(interaction_id in reason for interaction_id in ["contact_submit", "newsletter_signup", "login_form"]):
             interaction_id = reason.split(":")[0]
-            instructions.append(
-                f"### {interaction_id} Interaction Failure\n"
-                f"- {reason}\n"
-                f"- Fix JavaScript form submission handler\n"
-                f"- Ensure backend route processes POST requests correctly\n"
-                f"- Display appropriate success/error messages\n"
-            )
+            tips = [
+                f"### {interaction_id} Interaction Failure\n",
+                f"- {reason}\n",
+                "- Fix JavaScript form submission handler\n",
+                "- Ensure backend route processes POST requests correctly\n",
+                "- Display appropriate success/error messages\n",
+            ]
+            if "501" in reason:
+                tips.append(
+                    "- A 501 status often means the request hit the static server. Point the frontend fetch to the Flask API (e.g. http://localhost:5000/api/contact) or proxy it through the backend.\n"
+                )
+            instructions.append("".join(tips))
     
     return "\n".join(instructions)
