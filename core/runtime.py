@@ -7,7 +7,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
 
-import requests
+try:  # pragma: no cover - optional dependency
+    import requests
+except ModuleNotFoundError:  # pragma: no cover - fallback used in tests
+    class _RequestsStub:
+        class RequestException(Exception):
+            pass
+
+        @staticmethod
+        def get(*_, **__):
+            raise ModuleNotFoundError(
+                "requests is required to check service readiness. Install requests to enable runtime server checks."
+            )
+
+    requests = _RequestsStub()  # type: ignore[assignment]
 
 from .stack import ensure_config_override
 from .types import StackInfo, StartCommand

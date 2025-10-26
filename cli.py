@@ -5,8 +5,22 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+import click
 import typer
 from rich.console import Console
+from typer.core import TyperCommand
+
+_original_get_command = typer.main.get_command
+
+
+def _compat_get_command(typer_instance):  # pragma: no cover - compatibility shim
+    if isinstance(typer_instance, click.Command):
+        return typer_instance
+    return _original_get_command(typer_instance)
+
+
+typer.main.get_command = _compat_get_command
+typer.testing._get_command = _compat_get_command
 
 from core.intent import classify_intent
 from core.stack import analyze_project
@@ -22,16 +36,14 @@ def _resolve_project_path(path: Optional[Path]) -> Path:
     return Path.cwd().resolve()
 
 
-def main(
-    description: str = typer.Argument(..., help="Goal or request for Symphony"),
-    project: Optional[Path] = typer.Option(None, "--project", help="Target project directory"),
-    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open browser when the run succeeds"),
-    max_passes: int = typer.Option(3, "--max-passes", min=1, help="Maximum refinement passes"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Plan routing without running agents"),
-    detailed_log: bool = typer.Option(False, "--detailed-log", help="Print extended logs to stderr"),
+def _execute(
+    description: str,
+    project: Optional[Path],
+    open_browser: bool,
+    max_passes: int,
+    dry_run: bool,
+    detailed_log: bool,
 ) -> None:
-    """Execute Symphony on an existing or new project."""
-
     project_path = _resolve_project_path(project)
 
     if not project_path.exists():
@@ -81,5 +93,33 @@ def main(
     raise typer.Exit(0)
 
 
+if not hasattr(TyperCommand, "_add_completion"):  # pragma: no cover - compatibility shim
+    TyperCommand._add_completion = False  # type: ignore[attr-defined]
+
+
+main = typer.Typer()
+
+
+@main.command()
+def run(
+    description: str = typer.Argument(..., help="Goal or request for Symphony"),
+    project: Optional[Path] = typer.Option(None, "--project", help="Target project directory"),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open browser when the run succeeds"),
+    max_passes: int = typer.Option(3, "--max-passes", min=1, help="Maximum refinement passes"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Plan routing without running agents"),
+    detailed_log: bool = typer.Option(False, "--detailed-log", help="Print extended logs to stderr"),
+) -> None:
+    """Execute Symphony on an existing or new project."""
+
+    _execute(
+        description=description,
+        project=project,
+        open_browser=open_browser,
+        max_passes=max_passes,
+        dry_run=dry_run,
+        detailed_log=detailed_log,
+    )
+
+
 if __name__ == "__main__":
-    typer.run(main)
+    main()

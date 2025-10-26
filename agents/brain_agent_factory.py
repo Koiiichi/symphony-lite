@@ -4,14 +4,36 @@ This module provides a factory to create Brain agents bound to specific project 
 with configurable models. No global state, full isolation between concurrent runs.
 """
 
-from smolagents import CodeAgent, tool
-from smolagents.cli import load_model
 import os
-import sys
 import pathlib
 import subprocess
-from typing import Optional, Dict, Any, Callable
+import sys
 from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional
+
+try:  # pragma: no cover - optional dependency
+    from smolagents import CodeAgent, tool
+    from smolagents.cli import load_model
+except ModuleNotFoundError:  # pragma: no cover - fallback used in tests
+    def tool(func: Callable) -> Callable:
+        """Fallback decorator when smolagents is unavailable."""
+
+        return func
+
+
+    class CodeAgent:  # type: ignore[misc]
+        """Minimal stub that mimics the interface required by tests."""
+
+        def __init__(self, *_, **__):
+            raise ModuleNotFoundError(
+                "smolagents is required to create a real CodeAgent. Install smolagents to enable agent execution."
+            )
+
+
+    def load_model(*_, **__):  # type: ignore[unused-argument]
+        raise ModuleNotFoundError(
+            "smolagents is required to load agent models. Install smolagents to enable agent execution."
+        )
 
 
 @dataclass
