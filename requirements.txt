@@ -1,7 +1,9 @@
 # Core dependencies for Symphony-Lite
 typer==0.9.0
+click>=8.1.0,<8.2.0  # Pin click to 8.1.x - typer 0.9.0 has issues with click 8.3.0+
 rich>=13.9.4,<14.0.0
 smolagents>=0.2.0
+litellm>=1.0.0  # Required for LiteLLM model support in smolagents
 openai>=1.0.0
 python-dotenv>=1.0.0
 

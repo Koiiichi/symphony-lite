@@ -1,0 +1,19 @@
+{
+  "start_commands": {
+    "backend": {
+      "command": ["python", "app.py"],
+      "cwd": "backend",
+      "kind": "backend",
+      "port": 5000,
+      "description": "Flask backend API"
+    },
+    "frontend": {
+      "command": ["python", "-m", "http.server", "8000"],
+      "cwd": "frontend",
+      "kind": "frontend",
+      "port": 8000,
+      "url": "http://localhost:8000/index.html",
+      "description": "Static frontend server"
+    }
+  }
+}

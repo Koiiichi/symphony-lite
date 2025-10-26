@@ -130,11 +130,11 @@ Guidelines:
 - Use meaningful interaction IDs like "contact_submit", "newsletter_signup", "login_form"
 """
 
-    # Get appropriate temperature for model
-    temperature = get_model_temperature("gpt-5-nano", desired_temp=0.0)
+    # Get appropriate temperature for model (gpt-4o-mini supports low temperature)
+    temperature = get_model_temperature("gpt-4o-mini", desired_temp=0.0)
     
     response = client.chat.completions.create(
-        model="gpt-5-nano",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a requirements extraction specialist. Return only valid JSON."},
             {"role": "user", "content": prompt}

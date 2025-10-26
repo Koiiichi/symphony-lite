@@ -40,7 +40,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback used in tests
 class BrainConfig:
     """Configuration for Brain agent instances."""
     model_type: str = "LiteLLMModel"
-    model_id: str = "gpt-5-nano"
+    model_id: str = "gpt-4o-mini"  # Changed from gpt-5-nano (doesn't exist)
     provider: Optional[str] = None
     api_base: Optional[str] = None
     api_key: Optional[str] = None

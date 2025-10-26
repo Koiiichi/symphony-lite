@@ -3,16 +3,41 @@
 ## Quick Start
 
 ### Install
-1. Clone the repository and install dependencies:
+1. Clone the repository and navigate to it:
    ```bash
    git clone <repository-url>
    cd symphony-lite
-   python -m pip install -r requirements.txt  # use `py -m pip` on Windows
    ```
-2. Provide API keys via environment variables or a `.env` file in the project directory:
+
+2. **(Recommended)** Create and activate a virtual environment:
+   ```bash
+   python -m venv venv
+   # On Windows (Git Bash):
+   source venv/Scripts/activate
+   # On macOS/Linux:
+   source venv/bin/activate
+   ```
+
+3. Install dependencies:
+   ```bash
+   python -m pip install -r requirements.txt
+   ```
+   
+   **Note:** If you encounter dependency conflicts, try:
+   ```bash
+   python -m pip cache purge
+   python -m pip install --no-cache-dir -r requirements.txt
+   ```
+
+4. Provide API keys via environment variables or a `.env` file in the project root directory:
    ```bash
    export SYMPHONY_BRAIN_API_KEY=... 
    export SYMPHONY_VISION_API_KEY=...
+   ```
+   Or create a `.env` file:
+   ```
+   SYMPHONY_BRAIN_API_KEY=your_key_here
+   SYMPHONY_VISION_API_KEY=your_key_here
    ```
 
 ### Run

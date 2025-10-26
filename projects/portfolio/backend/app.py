@@ -1,14 +1,16 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
+import os
 
-# Serve the frontend from the 'frontend' directory
-app = Flask(__name__, static_folder='frontend', static_url_path='/')
+# Serve the frontend from the '../frontend' directory (one level up)
+frontend_dir = os.path.join(os.path.dirname(__file__), '..', 'frontend')
+app = Flask(__name__, static_folder=None)  # Disable default static folder
 CORS(app)  # Enable CORS for all routes
 
 @app.route('/')
 def index():
-    # Serve the frontend index.html from the static folder
-    return app.send_static_file('index.html')
+    # Serve the frontend index.html from the frontend directory
+    return send_from_directory(frontend_dir, 'index.html')
 
 @app.route('/api/contact', methods=['POST'])
 def contact():

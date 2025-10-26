@@ -42,17 +42,101 @@ class ServerManager:
     def plan(self) -> List[StartCommand]:
         return self.stack.start_commands
 
+    def _ensure_dependencies(self, command: StartCommand) -> None:
+        """Ensure project dependencies are installed before starting servers."""
+        cwd = command.cwd
+        
+        # Check for npm project
+        package_json = cwd / "package.json"
+        node_modules = cwd / "node_modules"
+        
+        if package_json.exists() and not node_modules.exists():
+            print(f" Installing npm dependencies in {cwd.name}...")
+            try:
+                # On Windows, use shell=True or call npm.cmd directly
+                npm_cmd = ["npm.cmd" if os.name == "nt" else "npm", "install"]
+                result = subprocess.run(
+                    npm_cmd,
+                    cwd=str(cwd),
+                    capture_output=True,
+                    text=True,
+                    timeout=300,  # 5 minutes timeout
+                    shell=(os.name == "nt"),  # Use shell on Windows
+                )
+                if result.returncode != 0:
+                    print(f" Warning: npm install failed: {result.stderr}")
+                else:
+                    print(f"✓ Dependencies installed successfully")
+            except subprocess.TimeoutExpired:
+                print(f" Warning: npm install timed out")
+            except FileNotFoundError:
+                print(f" Warning: npm not found in PATH. Please install Node.js")
+        
+        # Check for Python project
+        requirements_txt = cwd / "requirements.txt"
+        venv_dir = cwd / "venv"
+        
+        if requirements_txt.exists() and not venv_dir.exists():
+            print(f" Creating Python virtual environment in {cwd.name}...")
+            try:
+                # Create venv
+                subprocess.run(
+                    ["python", "-m", "venv", "venv"],
+                    cwd=str(cwd),
+                    capture_output=True,
+                    timeout=60,
+                )
+                # Install requirements
+                pip_path = venv_dir / "Scripts" / "pip.exe" if os.name == "nt" else venv_dir / "bin" / "pip"
+                if pip_path.exists():
+                    print(f" Installing Python dependencies...")
+                    result = subprocess.run(
+                        [str(pip_path), "install", "-r", "requirements.txt"],
+                        cwd=str(cwd),
+                        capture_output=True,
+                        text=True,
+                        timeout=300,
+                    )
+                    if result.returncode != 0:
+                        print(f" Warning: pip install failed: {result.stderr}")
+                    else:
+                        print(f"✓ Python dependencies installed")
+            except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+                print(f" Warning: Failed to setup Python environment: {e}")
+
     def start_all(self, *, timeout: int = 60) -> Dict[str, str]:
         urls: Dict[str, str] = {}
+        
+        # First, ensure all dependencies are installed
+        for command in self.stack.start_commands:
+            self._ensure_dependencies(command)
+        
+        # Now start the servers
         for command in self.stack.start_commands:
             env = os.environ.copy()
             env.update(command.env)
+            
+            # On Windows, npm/node commands need special handling
+            cmd_list = list(command.command)  # Make a copy
+            
+            # If command starts with 'python', check for venv
+            if cmd_list[0] == "python":
+                venv_dir = command.cwd / "venv"
+                venv_python = venv_dir / "Scripts" / "python.exe" if os.name == "nt" else venv_dir / "bin" / "python"
+                if venv_python.exists():
+                    cmd_list[0] = str(venv_python)
+            
+            # npm/node commands need .cmd extension on Windows
+            if os.name == "nt" and cmd_list[0] in ["npm", "node", "npx"]:
+                cmd_list = [f"{cmd_list[0]}.cmd"] + cmd_list[1:]
+            
             proc = subprocess.Popen(
-                command.command,
+                cmd_list,
                 cwd=str(command.cwd),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                shell=(os.name == "nt"),  # Use shell on Windows for npm commands
             )
             self.running.append(RunningProcess(command=command, process=proc))
             if command.url:
