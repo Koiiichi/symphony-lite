@@ -6,19 +6,32 @@ Now returns standardized SensoryReport for contract compliance.
 
 import base64
 import json
+import logging
 import os
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+
+logger = logging.getLogger(__name__)
+
 try:  # pragma: no cover - optional dependency
     from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.common.exceptions import WebDriverException
 except ModuleNotFoundError:  # pragma: no cover - fallback used in tests
     class Options:  # type: ignore[misc]
         def __init__(self, *_, **__):
             raise ModuleNotFoundError(
                 "selenium is required for sensory agent operations. Install selenium to enable browser automation."
             )
+
+    class By:  # type: ignore[misc]
+        CSS_SELECTOR = "css selector"
+        XPATH = "xpath"
+
+    class WebDriverException(Exception):
+        pass
 
 try:  # pragma: no cover - optional dependency
     import helium  # type: ignore
@@ -89,6 +102,21 @@ def ensure_contact_present() -> str:
     return "Scrolled down to explore page; contact section may be below fold"
 
 
+def _resolve_element(driver, selector: str):
+    try:
+        if selector.startswith("css="):
+            return driver.find_element(By.CSS_SELECTOR, selector[4:])
+        if selector.startswith("xpath="):
+            return driver.find_element(By.XPATH, selector[6:])
+        if selector.startswith("//"):
+            return driver.find_element(By.XPATH, selector)
+        if selector.startswith(("#", ".", "[", "input", "textarea", "button")):
+            return driver.find_element(By.CSS_SELECTOR, selector)
+    except WebDriverException:
+        return None
+    return None
+
+
 def submit_contact_form(
     name="Test User",
     email="test@example.com",
@@ -102,61 +130,74 @@ def submit_contact_form(
     errors = []
     
     try:
+        driver = helium.get_driver()
+
+        def fill_field(selectors, value) -> bool:
+            for selector in selectors:
+                try:
+                    element = _resolve_element(driver, selector)
+                    if element is None:
+                        helium.write(value, into=selector)
+                        return True
+                    try:
+                        element.clear()
+                    except Exception:
+                        pass
+                    element.send_keys(value)
+                    return True
+                except Exception:
+                    continue
+            return False
+
+        def click_target(selectors) -> bool:
+            for selector in selectors:
+                try:
+                    element = _resolve_element(driver, selector)
+                    if element is None:
+                        helium.click(selector)
+                        return True
+                    element.click()
+                    return True
+                except Exception:
+                    continue
+            return False
+
         # Try different input selectors
-        name_selectors = ["Name", "name", "Your Name", "[name='name']", "#name"]
-        email_selectors = ["Email", "email", "Your Email", "[name='email']", "#email"]
-        message_selectors = ["Message", "message", "Your Message", "[name='message']", "#message", "textarea"]
+        name_selectors = ["Name", "name", "Your Name", "css=input[name='name']", "#name"]
+        email_selectors = ["Email", "email", "Your Email", "css=input[name='email']", "#email"]
+        message_selectors = [
+            "Message",
+            "message",
+            "Your Message",
+            "css=textarea[name='message']",
+            "#message",
+            "textarea",
+        ]
         
         # Fill name field
-        name_filled = False
-        for selector in name_selectors:
-            try:
-                helium.write(name, into=selector)
-                name_filled = True
-                break
-            except:
-                continue
-        
+        name_filled = fill_field(name_selectors, name)
         if not name_filled:
             errors.append("Could not find name field")
-        
+
         # Fill email field
-        email_filled = False
-        for selector in email_selectors:
-            try:
-                helium.write(email, into=selector)
-                email_filled = True
-                break
-            except:
-                continue
-        
+        email_filled = fill_field(email_selectors, email)
         if not email_filled:
             errors.append("Could not find email field")
-        
+
         # Fill message field
-        message_filled = False
-        for selector in message_selectors:
-            try:
-                helium.write(message, into=selector)
-                message_filled = True
-                break
-            except:
-                continue
-        
+        message_filled = fill_field(message_selectors, message)
         if not message_filled:
             errors.append("Could not find message field")
-        
+
         # Try to submit
-        submit_clicked = False
-        submit_selectors = ["Send", "Submit", "Send Message", "button[type='submit']"]
-        for selector in submit_selectors:
-            try:
-                helium.click(selector)
-                submit_clicked = True
-                break
-            except:
-                continue
-        
+        submit_selectors = [
+            "Send",
+            "Submit",
+            "Send Message",
+            "css=button[type='submit']",
+            "button[type='submit']",
+        ]
+        submit_clicked = click_target(submit_selectors)
         if not submit_clicked:
             errors.append("Could not find or click submit button")
         
@@ -280,12 +321,18 @@ def analyze_current_view() -> dict:
             else:
                 return json.loads(content)
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"Vision JSON parse failed: {e}, falling back to heuristic")
-            return analyze_view_heuristic()
-        
+            report = analyze_view_heuristic()
+            report.setdefault("warnings", []).append(
+                f"Vision JSON parse failed ({e.__class__.__name__})"
+            )
+            return report
+
     except Exception as e:
-        print(f"Vision analysis failed: {e}, falling back to heuristic")
-        return analyze_view_heuristic()
+        report = analyze_view_heuristic()
+        report.setdefault("warnings", []).append(
+            f"Vision analysis failed ({e.__class__.__name__})"
+        )
+        return report
 
 
 def analyze_view_heuristic() -> dict:
@@ -333,7 +380,8 @@ def analyze_view_heuristic() -> dict:
         "alignment_score": min(base_score + 0.1, 1.0),
         "spacing_score": min(base_score, 1.0),
         "contrast_score": min(base_score + 0.05, 1.0),
-        "visible_sections": visible_sections
+        "visible_sections": visible_sections,
+        "warnings": []
     }
 
 
@@ -362,7 +410,7 @@ def _get_last_xhr_status(url_pattern: str) -> Optional[int]:
         
         return None
     except Exception as e:
-        print(f"Failed to parse network logs: {e}")
+        logger.debug("Failed to parse network logs: %s", e)
         return None
 
 
@@ -409,7 +457,7 @@ def _count_elements() -> dict:
             "filters": filters
         }
     except Exception as e:
-        print(f"Element counting failed: {e}")
+        logger.debug("Element counting failed: %s", e)
         return {
             "kpi_tiles": 0,
             "charts": 0,
@@ -473,7 +521,7 @@ def _test_form_interaction(interaction_spec: dict) -> dict:
         return result
         
     except Exception as e:
-        print(f"Form interaction test failed: {e}")
+        logger.debug("Form interaction test failed: %s", e)
         return result
 
 
@@ -513,6 +561,7 @@ def inspect_site(url: str, run_id: str = "default", sensory_config: Optional[Dic
     spacing_scores = []
     contrast_scores = []
     visited_urls = []
+    warnings: list[str] = []
     
     try:
         # Start browser
@@ -523,6 +572,7 @@ def inspect_site(url: str, run_id: str = "default", sensory_config: Optional[Dic
         visited_urls.append(url)
         screen1_path = _save_step_screenshot("1_initial", run_id)
         screen1 = analyze_current_view()
+        warnings.extend(screen1.pop("warnings", []) or [])
         screenshots.append(Screenshot(page="initial_load", path=screen1_path))
         
         alignment_scores.append(screen1.get("alignment_score", 0.7))
@@ -534,6 +584,7 @@ def inspect_site(url: str, run_id: str = "default", sensory_config: Optional[Dic
         ensure_contact_present()
         screen2_path = _save_step_screenshot("2_scroll", run_id)
         screen2 = analyze_current_view()
+        warnings.extend(screen2.pop("warnings", []) or [])
         screenshots.append(Screenshot(page="after_scroll", path=screen2_path))
         
         alignment_scores.append(screen2.get("alignment_score", 0.7))
@@ -564,6 +615,7 @@ def inspect_site(url: str, run_id: str = "default", sensory_config: Optional[Dic
         # Step 3: Final analysis after interaction
         screen3_path = _save_step_screenshot("3_submit", run_id)
         screen3 = analyze_current_view()
+        warnings.extend(screen3.pop("warnings", []) or [])
         screenshots.append(Screenshot(page="after_submit", path=screen3_path))
         
         alignment_scores.append(screen3.get("alignment_score", 0.7))
@@ -587,6 +639,11 @@ def inspect_site(url: str, run_id: str = "default", sensory_config: Optional[Dic
         }
         
         # Determine status based on quality gates
+        deduped_warnings = []
+        for warning in warnings:
+            if warning and warning not in deduped_warnings:
+                deduped_warnings.append(warning)
+
         report = SensoryReport(
             status="pass",
             alignment_score=final_alignment,
@@ -602,7 +659,8 @@ def inspect_site(url: str, run_id: str = "default", sensory_config: Optional[Dic
             visited_urls=visited_urls,
             vision_scores=vision_scores,
             model_ids={"sensory": sensory_config.get("model_id", "gpt-4o")},
-            expectations=expectations
+            expectations=expectations,
+            warnings=deduped_warnings,
         )
         
         # Update status based on gates
