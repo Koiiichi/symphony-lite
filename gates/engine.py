@@ -25,7 +25,7 @@ class GateRegistry:
     
     def _register_default_predicates(self):
         """Register built-in predicates."""
-        
+
         self.register("kpi_min", self._kpi_min)
         self.register("charts_min", self._charts_min)
         self.register("tables_min", self._tables_min)
@@ -34,13 +34,32 @@ class GateRegistry:
         self.register("alignment_score", self._alignment_score)
         self.register("spacing_score", self._spacing_score)
         self.register("contrast_score", self._contrast_score)
-    
+
+    def _get_capability_config(self, expectations: Dict, key: str) -> Dict[str, Any]:
+        """Normalize capability expectation values to a dictionary."""
+
+        capabilities = expectations.get("capabilities", {})
+        value = capabilities.get(key, {})
+
+        if isinstance(value, dict):
+            return value
+
+        if isinstance(value, bool):
+            # Treat booleans as a simple required flag.
+            return {"required": value}
+
+        if isinstance(value, (int, float)):
+            # Numeric capabilities map to a minimum requirement.
+            return {"min": value}
+
+        return {}
+
     def _kpi_min(self, expectations: Dict, observations: Dict) -> Tuple[bool, str]:
         """Check minimum KPI tiles count."""
-        required = expectations.get("capabilities", {}).get("kpi_tiles", {}).get("min", 0)
+        required = self._get_capability_config(expectations, "kpi_tiles").get("min", 0)
         if required == 0:
             return True, ""
-        
+
         actual = observations.get("elements", {}).get("kpi_tiles", 0)
         if actual >= required:
             return True, ""
@@ -48,10 +67,10 @@ class GateRegistry:
     
     def _charts_min(self, expectations: Dict, observations: Dict) -> Tuple[bool, str]:
         """Check minimum charts count."""
-        required = expectations.get("capabilities", {}).get("charts", {}).get("min", 0)
+        required = self._get_capability_config(expectations, "charts").get("min", 0)
         if required == 0:
             return True, ""
-        
+
         actual = observations.get("elements", {}).get("charts", 0)
         if actual >= required:
             return True, ""
@@ -59,21 +78,22 @@ class GateRegistry:
     
     def _tables_min(self, expectations: Dict, observations: Dict) -> Tuple[bool, str]:
         """Check minimum tables count."""
-        required = expectations.get("capabilities", {}).get("tables", {}).get("min", 0)
+        required = self._get_capability_config(expectations, "tables").get("min", 0)
         if required == 0:
             return True, ""
-        
+
         actual = observations.get("elements", {}).get("tables", 0)
         if actual >= required:
             return True, ""
         return False, f"tables: expected >={required}, got {actual}"
-    
+
     def _filters_required(self, expectations: Dict, observations: Dict) -> Tuple[bool, str]:
         """Check if filters are present when required."""
-        required = expectations.get("capabilities", {}).get("filters", {}).get("required", False)
+        config = self._get_capability_config(expectations, "filters")
+        required = config.get("required", False)
         if not required:
             return True, ""
-        
+
         actual = observations.get("elements", {}).get("filters", 0)
         if actual > 0:
             return True, ""
@@ -241,12 +261,17 @@ def get_fix_instructions(
         
         elif any(interaction_id in reason for interaction_id in ["contact_submit", "newsletter_signup", "login_form"]):
             interaction_id = reason.split(":")[0]
-            instructions.append(
-                f"### {interaction_id} Interaction Failure\n"
-                f"- {reason}\n"
-                f"- Fix JavaScript form submission handler\n"
-                f"- Ensure backend route processes POST requests correctly\n"
-                f"- Display appropriate success/error messages\n"
-            )
+            tips = [
+                f"### {interaction_id} Interaction Failure\n",
+                f"- {reason}\n",
+                "- Fix JavaScript form submission handler\n",
+                "- Ensure backend route processes POST requests correctly\n",
+                "- Display appropriate success/error messages\n",
+            ]
+            if "501" in reason:
+                tips.append(
+                    "- A 501 status often means the request hit the static server. Point the frontend fetch to the Flask API (e.g. http://localhost:5000/api/contact) or proxy it through the backend.\n"
+                )
+            instructions.append("".join(tips))
     
     return "\n".join(instructions)

@@ -252,7 +252,32 @@ def create_brain_agent(
     if config.api_key:
         model_kwargs["api_key"] = config.api_key
     
-    model = load_model(config.model_type, config.model_id, **model_kwargs)
+    try:
+        model = load_model(config.model_type, config.model_id, **model_kwargs)
+    except ModuleNotFoundError as exc:
+        missing = exc.name
+        if not missing and "'" in str(exc):
+            missing = str(exc).split("'")[1]
+
+        dependency = missing or "required dependency"
+        if dependency == "litellm":
+            python_cmd = f"\"{sys.executable}\" -m pip install litellm"
+            install_hint = (
+                f"{python_cmd} (or reinstall smolagents with the litellm extra inside this interpreter)"
+            )
+        elif missing:
+            install_hint = f"\"{sys.executable}\" -m pip install {dependency}"
+        else:
+            install_hint = f"\"{sys.executable}\" -m pip install <package>"
+
+        raise RuntimeError(
+            "Brain agent setup requires additional packages. "
+            f"Install the '{dependency}' dependency in this environment with {install_hint} and rerun your request."
+        ) from None
+    except Exception as exc:  # pragma: no cover - surface friendly error message
+        raise RuntimeError(
+            f"Failed to initialize Brain model '{config.model_id}': {exc}"
+        ) from exc
     
     # Create agent with project-scoped tools
     # Agent name must be a valid Python identifier (no hyphens)

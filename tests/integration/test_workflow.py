@@ -35,6 +35,9 @@ class FakeHooks:
             "interactions": {},
         }
 
+    def consume_brain_log(self, pass_index: int):  # pragma: no cover - interface fulfilment
+        return None
+
 
 class AlwaysPassingVision(FakeHooks):
     def run_vision(self, url: str, expectations, *, pass_index: int):
