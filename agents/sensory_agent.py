@@ -4,14 +4,35 @@
 Now returns standardized SensoryReport for contract compliance.
 """
 
-import helium
-import time
-import json
 import base64
+import json
 import os
+import time
 from pathlib import Path
-from typing import Dict, Any, Optional
-from selenium.webdriver.chrome.options import Options
+from typing import Any, Dict, Optional
+
+try:  # pragma: no cover - optional dependency
+    from selenium.webdriver.chrome.options import Options
+except ModuleNotFoundError:  # pragma: no cover - fallback used in tests
+    class Options:  # type: ignore[misc]
+        def __init__(self, *_, **__):
+            raise ModuleNotFoundError(
+                "selenium is required for sensory agent operations. Install selenium to enable browser automation."
+            )
+
+try:  # pragma: no cover - optional dependency
+    import helium  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - fallback used in tests
+    class _HeliumStub:
+        def __getattr__(self, name):
+            def _missing(*_, **__):
+                raise ModuleNotFoundError(
+                    "helium is required for sensory agent operations. Install helium to enable browser automation."
+                )
+
+            return _missing
+
+    helium = _HeliumStub()
 
 # Import contract types
 from agents.sensory_contract import (
