@@ -53,6 +53,7 @@ class ServerManager:
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                text=True,
             )
             self.running.append(RunningProcess(command=command, process=proc))
             if command.url:
@@ -60,7 +61,16 @@ class ServerManager:
             elif command.port:
                 urls[command.kind] = f"http://localhost:{command.port}"
             if command.port:
-                self._wait_for_port(command.port, timeout=timeout)
+                try:
+                    self._wait_for_port(
+                        command.port,
+                        timeout=timeout,
+                        process=proc,
+                        description=command.description or "Service",
+                    )
+                except Exception:
+                    self.stop_all()
+                    raise
         return urls
 
     def stop_all(self) -> None:
@@ -73,10 +83,26 @@ class ServerManager:
                     proc.process.kill()
         self.running.clear()
 
-    def _wait_for_port(self, port: int, *, timeout: int = 60) -> None:
+    def _wait_for_port(
+        self,
+        port: int,
+        *,
+        timeout: int = 60,
+        process: subprocess.Popen | None = None,
+        description: str | None = None,
+    ) -> None:
         url = f"http://localhost:{port}"
         start = time.time()
         while time.time() - start < timeout:
+            if process and process.poll() is not None:
+                stdout, stderr = process.communicate()
+                message = description or f"Service on port {port}"
+                detail = (stderr or stdout or "").strip()
+                if detail:
+                    message += f" failed: {detail.splitlines()[0]}"
+                else:
+                    message += " exited unexpectedly."
+                raise RuntimeError(message)
             try:
                 response = requests.get(url, timeout=2)
                 if response.status_code < 500:
@@ -84,7 +110,30 @@ class ServerManager:
             except requests.RequestException:
                 pass
             time.sleep(1)
-        raise TimeoutError(f"Service on port {port} did not become ready")
+        message = description or f"Service on port {port}"
+        if process:
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
+                detail = (stderr or stdout or "").strip()
+                if detail:
+                    message += f" exited early: {detail.splitlines()[0]}"
+                else:
+                    message += " exited before becoming ready."
+                raise RuntimeError(message)
+            process.terminate()
+            try:
+                stdout, stderr = process.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                stdout, stderr = process.communicate()
+            detail = (stderr or stdout or "").strip()
+            if detail:
+                message += f" timed out. Last output: {detail.splitlines()[0]}"
+            else:
+                message += " timed out before responding."
+            raise TimeoutError(message)
+
+        raise TimeoutError(f"{message} did not become ready in {timeout} seconds")
 
 
 def prompt_for_start_command(goal: str, project_root: Path) -> StartCommand:

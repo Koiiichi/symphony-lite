@@ -9,6 +9,20 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from rich.spinner import Spinner
+
+
+from .spinners import ensure_bw_spinners
+
+
+ensure_bw_spinners()
+
+SPINNER_MAP = {
+    "pulsing_star": "pulsing_star_bw",
+    "orbit": "orbit_bw",
+    "dots": "dots",
+    "bouncingBall": "bounce_bw",
+}
 
 
 @dataclass
@@ -30,6 +44,8 @@ class SymphonyTUI:
         self.todo_lines: List[str] = []
         self.footer: Optional[str] = None
         self._live: Optional[Live] = None
+        self._active_activity: Optional[str] = None
+        self._spinner_style: str = "dots"
 
     @contextmanager
     def live(self):
@@ -48,14 +64,28 @@ class SymphonyTUI:
         self.status_lines[label] = StatusLine(label=label, status=status, detail=detail)
         self._refresh()
 
-    def add_voice(self, text: str) -> None:
-        line = f"⏺ {text.strip()}"
+    def add_voice(self, text: str, *, icon: str = "•") -> None:
+        line = f"{icon} {text.strip()}"
         self.voice_lines.append(line)
         self._refresh()
 
     def add_sub_info(self, text: str) -> None:
         self.voice_lines.append(f"  ⎿ {text.strip()}")
         self._refresh()
+
+    def start_activity(self, text: str, *, spinner: str = "dots") -> None:
+        """Show a spinner while a long-running step is in progress."""
+
+        self._active_activity = text.strip()
+        self._spinner_style = SPINNER_MAP.get(spinner, spinner)
+        self._refresh()
+
+    def stop_activity(self, completion: Optional[str] = None, *, icon: str = "•") -> None:
+        self._active_activity = None
+        if completion:
+            self.add_voice(completion, icon=icon)
+        else:
+            self._refresh()
 
     def set_footer(self, text: str) -> None:
         self.footer = text
@@ -85,6 +115,8 @@ class SymphonyTUI:
             status_table.add_row(f"{status.label}: {status.status}{detail}")
 
         voice = Table.grid(padding=0)
+        if self._active_activity:
+            voice.add_row(Spinner(self._spinner_style, text=self._active_activity))
         for line in self.voice_lines[-15:]:
             voice.add_row(line)
 
