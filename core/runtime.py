@@ -1,26 +1,12 @@
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
-
-try:  # pragma: no cover - optional dependency
-    import requests
-except ModuleNotFoundError:  # pragma: no cover - fallback used in tests
-    class _RequestsStub:
-        class RequestException(Exception):
-            pass
-
-        @staticmethod
-        def get(*_, **__):
-            raise ModuleNotFoundError(
-                "requests is required to check service readiness. Install requests to enable runtime server checks."
-            )
-
-    requests = _RequestsStub()  # type: ignore[assignment]
 
 from .stack import ensure_config_override
 from .types import StackInfo, StartCommand
@@ -174,7 +160,6 @@ class ServerManager:
         process: subprocess.Popen | None = None,
         description: str | None = None,
     ) -> None:
-        url = f"http://localhost:{port}"
         start = time.time()
         while time.time() - start < timeout:
             if process and process.poll() is not None:
@@ -187,10 +172,9 @@ class ServerManager:
                     message += " exited unexpectedly."
                 raise RuntimeError(message)
             try:
-                response = requests.get(url, timeout=2)
-                if response.status_code < 500:
+                with socket.create_connection(("localhost", port), timeout=2):
                     return
-            except requests.RequestException:
+            except OSError:
                 pass
             time.sleep(1)
         message = description or f"Service on port {port}"
