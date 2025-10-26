@@ -117,6 +117,41 @@ def test_gate_engine():
     print("\nGate Engine: PASSED")
 
 
+def test_gate_engine_handles_legacy_capability_shapes():
+    """Ensure gate predicates accept shorthand capability declarations."""
+
+    expectations = {
+        "capabilities": {
+            "kpi_tiles": 2,  # numeric shorthand should map to min requirement
+            "charts": {"min": 0},
+            "tables": 0,
+            "filters": True,  # boolean shorthand should map to required flag
+        },
+        "interactions": [],
+    }
+
+    # Not enough KPI tiles and missing filter => fails
+    failing_observations = {
+        "elements": {"kpi_tiles": 1, "charts": 0, "tables": 0, "filters": 0},
+        "vision_scores": {"alignment": 1.0, "spacing": 1.0, "contrast": 1.0},
+    }
+
+    result = evaluate_gates(expectations, failing_observations)
+    assert result["passed"] is False
+    assert any("kpi_tiles" in reason for reason in result["failing_reasons"])
+    assert any("filters" in reason for reason in result["failing_reasons"])
+
+    # Meets shorthand requirements => passes
+    passing_observations = {
+        "elements": {"kpi_tiles": 3, "charts": 0, "tables": 2, "filters": 1},
+        "vision_scores": {"alignment": 1.0, "spacing": 1.0, "contrast": 1.0},
+    }
+
+    result = evaluate_gates(expectations, passing_observations)
+    assert result["passed"] is True
+    assert result["failing_reasons"] == []
+
+
 def test_integration():
     """Test integration of goal interpreter and gate engine."""
     print("\n\nTesting Integration...")

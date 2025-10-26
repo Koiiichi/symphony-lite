@@ -38,15 +38,43 @@ Common flags:
 * `--detailed-log` – show expanded trace summaries in the terminal UI.
 
 ### What You’ll See
-The terminal UI streams a compact feed while agents work. Expect voice-style updates and sub-lines:
+Symphony now keeps the terminal lively from the moment you launch a run. You’ll see a monochrome spinner during the quick
+preflight checks, followed by a richer activity feed once the orchestration UI appears:
 ```
 > Ensure UI/UX is up to the mark
-⏺ Vision: Scanning homepage at breakpoints…
-  ⎿ Issues: Button tap targets < 44px on mobile
-⏺ Brain: Applying scoped CSS fixes for padding and contrast…
-  ⎿ Patched styles/button.css
+✶ Preparing project scan…
+◯ Interpreting goal…
+
+┌──────────────────────── Symphony ────────────────────────┐
+│ Project: …/projects/portfolio                            │
+│ Goal: Ensure UI/UX is up to the mark                     │
+│ Mode: refine (ui_ux)                                     │
+│ Passes: 3                                                │
+│ Run: run_20251026_104500                                 │
+└──────────────────────────────────────────────────────────┘
+┌──────────────────────── Status ──────────────────────────┐
+│ Stack Detection: COMPLETE – frontend: start command ready│
+│ Servers: READY – backend: http://localhost:5000,         │
+│          frontend: http://localhost:8000/index.html      │
+│ Expectations: READY – 4 capabilities                     │
+│ Pass: 1/3 – running                                      │
+└──────────────────────────────────────────────────────────┘
+┌────────────────────── Activity ──────────────────────────┐
+│ • Analyzing project and classifying intent…              │
+│   ⎿ Detected intent: refine, topic: ui_ux                │
+│ • Plan ready: Vision → Brain → Vision                    │
+│ [vision] Vision: Audit complete                          │
+│   ⎿ Scores – alignment: 0.91, spacing: 0.86, contrast:   │
+│     0.95                                                 │
+│   ⎿ Elements – KPIs: 0, charts: 0, tables: 1, filters: 0 │
+│   ⎿ Issues: Button tap targets < 44px on mobile          │
+│ -> Vision ⇢ Brain: Sharing 1 finding for fixes.          │
+│ [brain] Brain: Applied targeted fixes                    │
+│ <- Brain ⇢ Vision: Updates ready for validation.         │
+└──────────────────────────────────────────────────────────┘
 ```
-All prompts and provider transcripts remain private; only human-readable summaries are shown.
+Audit summaries now call out visible sections, navigation paths, accessibility findings, and any cross-agent hand-offs so you can
+follow the investigation step by step.
 
 ### Testing
 Run the full automated suite (unit, integration, CLI checks):
@@ -55,4 +83,4 @@ pytest
 ```
 
 ### Privacy & Safety
-Symphony confirms before creating directories or scaffolding new projects, enforces max-pass limits, and never prints raw prompts or API responses in the UI.
+Symphony confirms before creating directories or scaffolding new projects, enforces max-pass limits, and always prompts before shutting down any services it started for the run.
