@@ -24,9 +24,8 @@ def _compat_get_command(typer_instance):  # pragma: no cover - compatibility shi
 
 
 typer.main.get_command = _compat_get_command
-# Only set typer.testing._get_command if the module exists (compatibility with different typer versions)
-if hasattr(typer, 'testing'):
-    typer.testing._get_command = _compat_get_command
+if hasattr(typer, "testing"):
+    typer.testing._get_command = _compat_get_command  # type: ignore[attr-defined]
 
 from core.intent import classify_intent
 from core.spinners import ensure_bw_spinners
@@ -85,6 +84,15 @@ def _execute(
         summary = run_workflow(config, stack=stack, intent=intent)
     except RuntimeError as exc:  # surface friendly message
         console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    except Exception as exc:  # pragma: no cover - unexpected failure
+        if detailed_log:
+            console.print_exception()
+        else:
+            console.print(f"[red]Unexpected error: {exc}[/red]")
+            console.print(
+                "[red]Re-run with --detailed-log to view the full traceback.[/red]"
+            )
         raise typer.Exit(1)
 
     status = summary.status
