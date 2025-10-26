@@ -78,11 +78,23 @@ def _execute(
         raise typer.Exit(1)
 
     status = summary.status
-    console.print(f"Status: {status}")
+
+    if status == "success":
+        message = summary.final_message or "Success!"
+        console.print(f"[green]{message}[/green]")
+    else:
+        console.print(f"Status: {status}")
+        if summary.final_message:
+            console.print(summary.final_message)
+
     if summary.intent:
         console.print(
             f"Mode: {summary.intent.intent} ({summary.intent.topic}), Passes: {len(summary.passes)}"
         )
+
+    if summary.urls:
+        preview_lines = ", ".join(f"{kind}: {url}" for kind, url in summary.urls.items())
+        console.print(f"Preview URLs: {preview_lines}")
 
     if status == "dry_run":
         raise typer.Exit(0)

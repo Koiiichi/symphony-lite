@@ -73,6 +73,7 @@ class WorkflowSummary:
     artifacts: Dict[str, str] = field(default_factory=dict)
     intent: Optional[IntentResult] = None
     stack: Optional[StackInfo] = None
+    final_message: Optional[str] = None
 
     def add_pass(self, outcome: PassOutcome) -> None:
         self.passes.append(outcome)
