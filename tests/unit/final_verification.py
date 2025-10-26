@@ -26,7 +26,7 @@ goals = {
 }
 
 for page_type, goal in goals.items():
-    exp = build_expectations(goal)
+    exp = build_expectations(goal, vision_mode="qa")
     print(f"  {page_type:12} -> capabilities: {sum(exp['capabilities'][k].get('min', 0) for k in exp['capabilities'])}, "
           f"interactions: {len(exp['interactions'])}")
 
@@ -35,7 +35,7 @@ print("  PASS: No hard-coded page types, all goals produce expectations")
 print("\n[2/5] Verifying Gate Engine evaluates capabilities...")
 
 # Dashboard scenario
-dash_exp = build_expectations("Analytics dashboard with 3 KPIs, chart, table")
+dash_exp = build_expectations("Analytics dashboard with 3 KPIs, chart, table", vision_mode="qa")
 dash_obs_fail = {
     "elements": {"kpi_tiles": 2, "charts": 0, "tables": 0, "filters": 0},
     "interactions": {},
@@ -58,7 +58,7 @@ print("  PASS: Gate Engine evaluates capabilities correctly")
 
 print("\n[3/5] Verifying interaction gating (form_submit)...")
 
-contact_exp = build_expectations("Contact page accepts messages")
+contact_exp = build_expectations("Contact page accepts messages", vision_mode="qa")
 contact_obs_broken = {
     "elements": {"kpi_tiles": 0, "charts": 0, "tables": 0, "filters": 0},
     "interactions": {

@@ -4,9 +4,13 @@ import os
 import socket
 import subprocess
 import time
-from dataclasses import dataclass
+import contextlib
+from dataclasses import dataclass, field
+from html.parser import HTMLParser
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from .stack import ensure_config_override
 from .types import StackInfo, StartCommand
@@ -16,6 +20,27 @@ from .types import StackInfo, StartCommand
 class RunningProcess:
     command: StartCommand
     process: subprocess.Popen
+
+
+@dataclass
+class ServerProbe:
+    url: str
+    kind: str
+    status_code: Optional[int] = None
+    content_type: Optional[str] = None
+    is_blank: bool = False
+    node_count: int = 0
+    body: Optional[str] = None
+    error: Optional[str] = None
+
+
+@dataclass
+class ServerSelection:
+    url: Optional[str]
+    probe: Optional[ServerProbe]
+    fallback_used: bool = False
+    message: Optional[str] = None
+    artifacts: Dict[str, str] = field(default_factory=dict)
 
 
 class ServerManager:
@@ -90,15 +115,20 @@ class ServerManager:
             except (subprocess.TimeoutExpired, FileNotFoundError) as e:
                 print(f" Warning: Failed to setup Python environment: {e}")
 
-    def start_all(self, *, timeout: int = 60) -> Dict[str, str]:
+    def start_all(self, *, timeout: int = 60, preferred_kind: Optional[str] = None) -> Dict[str, str]:
         urls: Dict[str, str] = {}
-        
+
         # First, ensure all dependencies are installed
         for command in self.stack.start_commands:
             self._ensure_dependencies(command)
-        
-        # Now start the servers
-        for command in self.stack.start_commands:
+
+        commands = list(self.stack.start_commands)
+        if preferred_kind:
+            commands.sort(
+                key=lambda cmd: (cmd.kind != preferred_kind, cmd.kind != "frontend")
+            )
+
+        for command in commands:
             env = os.environ.copy()
             env.update(command.env)
             
@@ -152,6 +182,150 @@ class ServerManager:
                     proc.process.kill()
         self.running.clear()
 
+    def resolve_preview_surface(
+        self,
+        *,
+        run_id: str,
+        preferred_kind: Optional[str] = None,
+        hints: Optional[Dict[str, List[str]]] = None,
+    ) -> ServerSelection:
+        """Select the best preview surface among running services."""
+
+        hints = hints or {}
+        selectors = hints.get("selectors", [])
+        keywords = hints.get("keywords", [])
+
+        candidates: List[Tuple[str, str]] = []
+        for command in self.stack.start_commands:
+            url = command.url or (command.port and f"http://localhost:{command.port}")
+            if url:
+                candidates.append((command.kind, url))
+
+        if self.stack.frontend_url and not any(
+            url == self.stack.frontend_url for _, url in candidates
+        ):
+            candidates.append(("frontend", self.stack.frontend_url))
+        if self.stack.backend_url and not any(
+            url == self.stack.backend_url for _, url in candidates
+        ):
+            candidates.append(("backend", self.stack.backend_url))
+
+        seen = set()
+        unique_candidates: List[Tuple[str, str]] = []
+        for kind, url in candidates:
+            if url in seen:
+                continue
+            seen.add(url)
+            unique_candidates.append((kind, url))
+
+        probes: List[ServerProbe] = []
+        for kind, url in unique_candidates:
+            probes.append(self._probe_candidate(kind, url))
+
+        healthy = [probe for probe in probes if probe.status_code and 200 <= probe.status_code < 300 and not probe.error]
+        non_blank = [probe for probe in healthy if not probe.is_blank]
+        blank = [probe for probe in healthy if probe.is_blank]
+
+        def matches_hints(probe: ServerProbe) -> bool:
+            if not selectors and not keywords:
+                return True
+            body = probe.body or ""
+            if selectors:
+                if any(selector in body for selector in selectors):
+                    return True
+            if keywords:
+                normalized = body.lower()
+                if any(keyword.lower() in normalized for keyword in keywords):
+                    return True
+            return False
+
+        preferred_candidates = [
+            probe for probe in non_blank if preferred_kind and probe.kind == preferred_kind
+        ]
+        preferred_candidates = [probe for probe in preferred_candidates if matches_hints(probe)]
+
+        chosen: Optional[ServerProbe] = None
+        if preferred_candidates:
+            chosen = preferred_candidates[0]
+        else:
+            hint_matches = [probe for probe in non_blank if matches_hints(probe)]
+            if hint_matches:
+                chosen = hint_matches[0]
+            elif non_blank:
+                chosen = non_blank[0]
+
+        if chosen:
+            return ServerSelection(url=chosen.url, probe=chosen)
+
+        artifacts: Dict[str, str] = {}
+        message: Optional[str] = None
+        fallback_used = False
+
+        if blank:
+            blank_probe = blank[0]
+            artifacts = self._capture_blank_artifacts(run_id, blank_probe)
+            message = (
+                "Primary surface returned a blank DOM. Captured diagnostics and continuing with fallback."
+            )
+            fallback_used = True
+            return ServerSelection(
+                url=blank_probe.url,
+                probe=blank_probe,
+                fallback_used=fallback_used,
+                message=message,
+                artifacts=artifacts,
+            )
+
+        first_error = next((probe for probe in probes if probe.error), None)
+        if first_error:
+            message = f"Failed to reach {first_error.url}: {first_error.error}"
+        else:
+            message = "No responsive preview surface detected."
+
+        return ServerSelection(
+            url=None,
+            probe=None,
+            fallback_used=False,
+            message=message,
+            artifacts=artifacts,
+        )
+
+    # Internal helpers -------------------------------------------------
+
+    def _probe_candidate(self, kind: str, url: str) -> ServerProbe:
+        request = Request(url, headers={"User-Agent": "SymphonyLite/1.0"})
+        try:
+            with contextlib.closing(urlopen(request, timeout=5)) as response:
+                status = getattr(response, "status", None) or response.getcode()
+                content_type = response.headers.get("Content-Type", "")
+                body_bytes = response.read()
+                try:
+                    body = body_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    body = body_bytes.decode("latin-1", errors="ignore")
+                parser = _DOMCountingParser()
+                try:
+                    parser.feed(body)
+                except Exception:
+                    pass
+                stripped = body.strip()
+                is_blank = not stripped or parser.node_count <= 1
+                return ServerProbe(
+                    url=url,
+                    kind=kind,
+                    status_code=status,
+                    content_type=content_type.split(";")[0],
+                    is_blank=is_blank,
+                    node_count=parser.node_count,
+                    body=body,
+                )
+        except HTTPError as exc:
+            return ServerProbe(url=url, kind=kind, status_code=exc.code, error=str(exc))
+        except URLError as exc:
+            return ServerProbe(url=url, kind=kind, error=str(exc.reason))
+        except Exception as exc:
+            return ServerProbe(url=url, kind=kind, error=str(exc))
+
     def _wait_for_port(
         self,
         port: int,
@@ -201,6 +375,37 @@ class ServerManager:
             raise TimeoutError(message)
 
         raise TimeoutError(f"{message} did not become ready in {timeout} seconds")
+
+    def _capture_blank_artifacts(self, run_id: str, probe: ServerProbe) -> Dict[str, str]:
+        artifacts_dir = Path("artifacts") / run_id / "servers"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        slug = _slugify(probe.url)
+        html_path = artifacts_dir / f"{slug}_dom.html"
+        html_path.write_text(probe.body or "")
+        console_path = artifacts_dir / f"{slug}_console.log"
+        console_path.write_text("Console logs are unavailable; page rendered blank DOM.\n")
+        network_path = artifacts_dir / f"{slug}_network.har"
+        network_path.write_text("[]")
+        return {
+            "dom": str(html_path),
+            "console": str(console_path),
+            "network": str(network_path),
+        }
+
+
+class _DOMCountingParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.node_count = 0
+
+    def handle_starttag(self, tag, attrs):  # pragma: no cover - html parser trivial
+        if tag:
+            self.node_count += 1
+
+
+def _slugify(value: str) -> str:
+    safe = [ch if ch.isalnum() else "_" for ch in value]
+    return "".join(safe)[:60]
 
 
 def prompt_for_start_command(goal: str, project_root: Path) -> StartCommand:

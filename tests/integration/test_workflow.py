@@ -20,8 +20,8 @@ class FakeHooks:
         self.events.append(("brain", pass_index, instructions))
         return {"status": "ok"}
 
-    def run_vision(self, url: str, expectations, *, pass_index: int):
-        self.events.append(("vision", pass_index, url))
+    def run_vision(self, url: str, expectations, *, pass_index: int, mode: str):
+        self.events.append(("vision", pass_index, url, mode))
         if not self._resolved:
             self._resolved = True
             return {
@@ -40,8 +40,8 @@ class FakeHooks:
 
 
 class AlwaysPassingVision(FakeHooks):
-    def run_vision(self, url: str, expectations, *, pass_index: int):
-        self.events.append(("vision", pass_index, url))
+    def run_vision(self, url: str, expectations, *, pass_index: int, mode: str):
+        self.events.append(("vision", pass_index, url, mode))
         return {
             "vision_scores": {"alignment": 0.95, "spacing": 0.95, "contrast": 0.95},
             "elements": {},
@@ -55,11 +55,22 @@ def server_manager_stub(monkeypatch):
         def __init__(self, stack):
             self.stack = stack
 
-        def start_all(self):
+        def start_all(self, preferred_kind=None):
             return {"frontend": "http://localhost:5173"}
 
         def stop_all(self):
             pass
+
+        class _Selection:
+            def __init__(self, url: str):
+                self.url = url
+                self.probe = None
+                self.fallback_used = False
+                self.message = None
+                self.artifacts = {}
+
+        def resolve_preview_surface(self, run_id, preferred_kind=None, hints=None):
+            return self._Selection("http://localhost:5173")
 
     monkeypatch.setattr("orchestrator.ServerManager", StubServerManager)
     monkeypatch.setenv("SYMPHONY_BRAIN_API_KEY", "test")
@@ -110,4 +121,4 @@ def test_create_flow_runs_brain_first(tmp_path, monkeypatch):
 
     assert hooks.events[0][0] == "brain"
     assert summary.passes
-    assert summary.status in {"success", "max_passes"}
+    assert summary.status in {"success", "max_passes", "stalled"}

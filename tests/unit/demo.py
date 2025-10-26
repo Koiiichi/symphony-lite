@@ -21,7 +21,7 @@ def demo_goal(goal_text, observations):
     print('='*70)
     
     # Build expectations
-    expectations = build_expectations(goal_text)
+    expectations = build_expectations(goal_text, vision_mode="qa")
     
     print("\nExpectations Generated:")
     print(f"  Capabilities:")

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from core.runtime import ServerManager
+from core.runtime import ServerManager, ServerProbe
 from core.types import StackInfo, StartCommand
 
 
@@ -74,3 +74,104 @@ def test_wait_for_port_detects_open_socket(tmp_path: Path) -> None:
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+def test_resolve_preview_surface_prefers_non_blank(monkeypatch, tmp_path: Path) -> None:
+    frontend = StartCommand(
+        command=[sys.executable, "-m", "http.server"],
+        cwd=tmp_path,
+        kind="frontend",
+        url="http://localhost:3000",
+    )
+    backend = StartCommand(
+        command=[sys.executable, "-m", "http.server"],
+        cwd=tmp_path,
+        kind="backend",
+        url="http://localhost:5000",
+    )
+    stack = StackInfo(
+        root=tmp_path,
+        has_code=True,
+        detected_files=[],
+        frameworks=[],
+        package_managers=[],
+        frontend="vite",
+        backend="flask",
+        start_commands=[frontend, backend],
+        frontend_url="http://localhost:3000",
+        backend_url="http://localhost:5000",
+    )
+    manager = ServerManager(stack)
+
+    def fake_probe(kind: str, url: str) -> ServerProbe:
+        if url.endswith("3000"):
+            return ServerProbe(
+                url=url,
+                kind=kind,
+                status_code=200,
+                content_type="text/html",
+                is_blank=True,
+                node_count=0,
+                body="\n\n",
+            )
+        return ServerProbe(
+            url=url,
+            kind=kind,
+            status_code=200,
+            content_type="text/html",
+            is_blank=False,
+            node_count=5,
+            body="<html><form id='contact'></form></html>",
+        )
+
+    monkeypatch.setattr(manager, "_probe_candidate", fake_probe)
+
+    selection = manager.resolve_preview_surface(
+        run_id="run-test",
+        preferred_kind="frontend",
+        hints={"selectors": ["contact"], "keywords": []},
+    )
+
+    assert selection.url == "http://localhost:5000"
+    assert selection.probe is not None
+    assert not selection.probe.is_blank
+
+
+def test_resolve_preview_surface_records_blank_artifacts(monkeypatch, tmp_path: Path) -> None:
+    command = StartCommand(
+        command=[sys.executable, "-m", "http.server"],
+        cwd=tmp_path,
+        kind="frontend",
+        url="http://localhost:1234",
+    )
+    stack = StackInfo(
+        root=tmp_path,
+        has_code=True,
+        detected_files=[],
+        frameworks=[],
+        package_managers=[],
+        frontend="vite",
+        backend=None,
+        start_commands=[command],
+        frontend_url="http://localhost:1234",
+    )
+    manager = ServerManager(stack)
+
+    monkeypatch.setattr(
+        manager,
+        "_probe_candidate",
+        lambda kind, url: ServerProbe(
+            url=url,
+            kind=kind,
+            status_code=200,
+            content_type="text/html",
+            is_blank=True,
+            node_count=0,
+            body="",
+        ),
+    )
+
+    selection = manager.resolve_preview_surface(run_id="run-blank", preferred_kind="frontend")
+
+    assert selection.probe is not None and selection.probe.is_blank
+    assert selection.artifacts

@@ -49,7 +49,8 @@ def build_expectations(
     goal: str,
     page_type_hint: Optional[str] = None,
     stack: Optional[Dict[str, Any]] = None,
-    expectations_file: Optional[str] = None
+    expectations_file: Optional[str] = None,
+    vision_mode: str = "hybrid",
 ) -> Dict[str, Any]:
     """Build expectations from goal using LLM or file override.
     
@@ -64,16 +65,18 @@ def build_expectations(
     """
     
     if expectations_file:
-        return _load_expectations_from_file(expectations_file)
-    
+        expectations = _load_expectations_from_file(expectations_file)
+        return _apply_mode_filters(expectations, vision_mode)
+
     if not HAS_OPENAI or not os.getenv("OPENAI_API_KEY"):
-        return _build_expectations_heuristic(goal, page_type_hint)
-    
+        return _build_expectations_heuristic(goal, page_type_hint, vision_mode=vision_mode)
+
     try:
-        return _build_expectations_llm(goal, page_type_hint, stack)
+        expectations = _build_expectations_llm(goal, page_type_hint, stack)
+        return _apply_mode_filters(expectations, vision_mode)
     except Exception as e:
         print(f"Goal interpreter LLM call failed: {e}, falling back to heuristic")
-        return _build_expectations_heuristic(goal, page_type_hint)
+        return _build_expectations_heuristic(goal, page_type_hint, vision_mode=vision_mode)
 
 
 def _load_expectations_from_file(filepath: str) -> Dict[str, Any]:
@@ -158,7 +161,9 @@ Guidelines:
 
 def _build_expectations_heuristic(
     goal: str,
-    page_type_hint: Optional[str]
+    page_type_hint: Optional[str],
+    *,
+    vision_mode: str = "hybrid",
 ) -> Dict[str, Any]:
     """Fallback heuristic when LLM unavailable."""
     
@@ -207,7 +212,24 @@ def _build_expectations_heuristic(
             "expect_http_2xx": True,
             "expect_success_banner": True
         })
-    
+
+    return _apply_mode_filters(expectations, vision_mode)
+
+
+def _apply_mode_filters(expectations: Dict[str, Any], vision_mode: str) -> Dict[str, Any]:
+    mode = (vision_mode or "hybrid").lower()
+    if mode != "qa":
+        expectations = dict(expectations)
+        expectations["interactions"] = []
+    capabilities = expectations.get("capabilities")
+    if isinstance(capabilities, dict):
+        for key in ("kpi_tiles", "charts", "tables"):
+            value = capabilities.get(key)
+            if isinstance(value, (int, float)):
+                capabilities[key] = {"min": int(value)}
+        filters = capabilities.get("filters")
+        if isinstance(filters, bool):
+            capabilities["filters"] = {"required": filters}
     return expectations
 
 

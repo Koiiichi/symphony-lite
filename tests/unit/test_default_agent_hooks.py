@@ -25,6 +25,7 @@ def test_default_agent_hooks_capture_stdout(monkeypatch, tmp_path: Path) -> None
         brain_config=BrainConfig(),
         sensory_config=SensoryConfig(),
         run_id="run_test",
+        vision_mode="hybrid",
     )
 
     hooks.run_brain("do work", pass_index=1)

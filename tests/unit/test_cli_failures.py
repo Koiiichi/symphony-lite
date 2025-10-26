@@ -41,6 +41,7 @@ def test_execute_handles_unexpected_error(monkeypatch, tmp_path, capsys):
             project=tmp_path,
             open_browser=False,
             max_passes=1,
+            vision_mode="hybrid",
             dry_run=False,
             detailed_log=False,
         )
