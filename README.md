@@ -63,15 +63,18 @@ Common flags:
 * `--detailed-log` – show expanded trace summaries in the terminal UI.
 
 ### What You’ll See
-The terminal UI streams a compact feed while agents work. Expect voice-style updates and sub-lines:
+The terminal UI now shows animated progress while the agents work and narrates the hand-off between them:
 ```
 > Ensure UI/UX is up to the mark
-⏺ Vision: Scanning homepage at breakpoints…
+⠋ Vision: Scanning homepage at breakpoints…
+👁 Vision: Audit complete
+  ⎿ Scores – alignment: 0.91, spacing: 0.86, contrast: 0.95
   ⎿ Issues: Button tap targets < 44px on mobile
-⏺ Brain: Applying scoped CSS fixes for padding and contrast…
-  ⎿ Patched styles/button.css
+⇢ Vision ⇢ Brain: Sharing 1 finding for fixes.
+🧠 Brain: Applied targeted fixes
+⇠ Brain ⇢ Vision: Updates ready for validation.
 ```
-All prompts and provider transcripts remain private; only human-readable summaries are shown.
+You’ll also see section, interaction, and accessibility highlights beneath each audit so it’s clear what the vision agent inspected.
 
 ### Testing
 Run the full automated suite (unit, integration, CLI checks):

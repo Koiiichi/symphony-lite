@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 
 from rich.console import Console
 
@@ -42,6 +42,81 @@ def _stack_to_dict(stack: StackInfo) -> Dict[str, object]:
         "frontend": stack.frontend,
         "backend": stack.backend,
     }
+
+
+def _summarize_stack(stack: StackInfo) -> str:
+    def describe(kind: str, detected: Optional[str]) -> str:
+        if detected:
+            return f"{kind}: {detected}"
+        has_command = any(cmd.kind == kind for cmd in stack.start_commands)
+        if has_command:
+            return f"{kind}: start command ready"
+        return f"{kind}: none"
+
+    parts = [describe("frontend", stack.frontend), describe("backend", stack.backend)]
+    return ", ".join(parts)
+
+
+def _summarize_list(values: Iterable[str], *, limit: int = 4) -> str:
+    values = list(values)
+    if len(values) <= limit:
+        return ", ".join(values)
+    clipped = values[:limit]
+    return ", ".join(clipped) + ", …"
+
+
+def _summarize_vision_report(report_data: Dict[str, object]) -> list[str]:
+    lines: list[str] = []
+
+    scores = []
+    for key, label in (
+        ("alignment_score", "alignment"),
+        ("spacing_score", "spacing"),
+        ("contrast_score", "contrast"),
+    ):
+        value = report_data.get(key)
+        if isinstance(value, (int, float)):
+            scores.append(f"{label}: {value:.2f}")
+    if scores:
+        lines.append("Scores – " + ", ".join(scores))
+
+    sections = report_data.get("visible_sections")
+    if isinstance(sections, Iterable) and not isinstance(sections, (str, bytes)):
+        section_list = [str(section) for section in sections if section]
+        if section_list:
+            lines.append("Sections in view – " + _summarize_list(section_list))
+
+    visited = report_data.get("visited_urls")
+    if isinstance(visited, Iterable) and not isinstance(visited, (str, bytes)):
+        visited_list = [str(url) for url in visited if url]
+        if visited_list:
+            lines.append("Visited – " + _summarize_list(visited_list, limit=3))
+
+    interaction = report_data.get("interaction")
+    if isinstance(interaction, dict):
+        interaction_bits = []
+        details = interaction.get("details")
+        if details:
+            interaction_bits.append(str(details))
+        status = interaction.get("http_status")
+        if status:
+            interaction_bits.append(f"HTTP {status}")
+        if interaction.get("errors"):
+            interaction_bits.append("errors detected")
+        if interaction_bits:
+            lines.append("Interaction – " + "; ".join(interaction_bits))
+
+    a11y = report_data.get("a11y")
+    if isinstance(a11y, dict):
+        violations = a11y.get("violations")
+        if isinstance(violations, int):
+            wcag_level = a11y.get("wcag_level")
+            text = f"Accessibility – {violations} violation{'s' if violations != 1 else ''}"
+            if wcag_level:
+                text += f", target: {wcag_level}"
+            lines.append(text)
+
+    return lines
 
 
 def _format_success_message(goal: str, intent: Optional[IntentResult], summary: WorkflowSummary) -> str:
@@ -165,9 +240,7 @@ def run_workflow(
 
             tui.update_status("Stack Detection", "RUNNING")
             time.sleep(0.05)
-            stack_summary = ", ".join(
-                filter(None, [stack.frontend or "frontend?", stack.backend or "backend?"])
-            )
+            stack_summary = _summarize_stack(stack)
             tui.update_status("Stack Detection", "COMPLETE", detail=stack_summary)
 
             tui.add_voice("Analyzing project and classifying intent…")
@@ -210,6 +283,8 @@ def run_workflow(
             last_failures: Optional[list[str]] = None
             stagnation_counter = 0
 
+            brain_in_plan = any(step.agent == "brain" for step in plan)
+
             for index in range(1, config.max_passes + 1):
                 tui.update_status("Pass", f"{index}/{config.max_passes}", detail="running")
                 changes_made = False
@@ -217,24 +292,35 @@ def run_workflow(
                 failing_reasons: list[str] = []
                 pass_outcome: Optional[PassOutcome] = None
 
-                for step in plan:
+                for step_idx, step in enumerate(plan):
+                    remaining_steps = plan[step_idx + 1 :]
                     if step.agent == "vision":
                         vision_url = preview_url or urls.get("frontend") or stack.frontend_url
                         if not vision_url:
                             raise RuntimeError("Vision agent requires a frontend URL")
-                        tui.add_voice(f"Vision: {step.description}…")
+                        tui.start_activity(f"Vision: {step.description}…", spinner="bouncingBall")
                         report = hooks.run_vision(vision_url, expectations, pass_index=index)
+                        tui.stop_activity("Vision: Audit complete", icon="👁")
                         if isinstance(report, SensoryReport):
                             pass_report = report
                             report_data = report.to_dict()
                         else:
                             report_data = report
+                        for info_line in _summarize_vision_report(report_data or {}):
+                            tui.add_sub_info(info_line)
                         gate_result = evaluate_gates(expectations, report_data)
                         failing_reasons = gate_result["failing_reasons"]
                         if failing_reasons:
                             tui.add_sub_info(
                                 "Issues: " + ", ".join(failing_reasons)
                             )
+                            if brain_in_plan:
+                                issue_count = len(failing_reasons)
+                                handoff = (
+                                    f"Vision ⇢ Brain: Sharing {issue_count} finding"
+                                    f"{'s' if issue_count != 1 else ''} for fixes."
+                                )
+                                tui.add_voice(handoff, icon="⇢")
                         else:
                             tui.add_sub_info("Issues: none")
                             pass_outcome = PassOutcome(
@@ -275,10 +361,19 @@ def run_workflow(
                                 f"Goal: {config.goal}\n\n"
                                 f"{instructions}\n"
                             )
-                        tui.add_voice(f"Brain: {step.description}…")
+                        tui.start_activity(f"Brain: {step.description}…", spinner="dots")
                         hooks.run_brain(instructions, pass_index=index)
+                        tui.stop_activity("Brain: Applied targeted fixes", icon="🧠")
                         changes_made = True
                         tui.add_sub_info("Applied targeted fixes")
+                        has_follow_up_vision = any(
+                            future_step.agent == "vision" for future_step in remaining_steps
+                        )
+                        if has_follow_up_vision:
+                            tui.add_voice(
+                                "Brain ⇢ Vision: Updates ready for validation.",
+                                icon="⇠",
+                            )
 
                 if pass_outcome is None:
                     pass_outcome = PassOutcome(
