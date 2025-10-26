@@ -23,11 +23,13 @@ typer.main.get_command = _compat_get_command
 typer.testing._get_command = _compat_get_command
 
 from core.intent import classify_intent
+from core.spinners import ensure_bw_spinners
 from core.stack import analyze_project
 from core.types import WorkflowConfig
 from orchestrator import run_workflow
 
 console = Console()
+ensure_bw_spinners()
 
 
 def _resolve_project_path(path: Optional[Path]) -> Path:
@@ -52,8 +54,10 @@ def _execute(
             raise typer.Exit(1)
         project_path.mkdir(parents=True, exist_ok=True)
 
-    stack = analyze_project(project_path)
-    intent = classify_intent(description, stack)
+    with console.status("Preparing project scan…", spinner="pulsing_star_bw") as status:
+        stack = analyze_project(project_path)
+        status.update("Interpreting goal…", spinner="orbit_bw")
+        intent = classify_intent(description, stack)
 
     if stack.is_empty and intent.intent == "refine" and not dry_run:
         proceed = typer.confirm("Empty folder detected. Proceed to scaffold a new project?", default=False)
@@ -72,17 +76,29 @@ def _execute(
     console.print(f"> {description}")
 
     try:
-        summary = run_workflow(config)
+        summary = run_workflow(config, stack=stack, intent=intent)
     except RuntimeError as exc:  # surface friendly message
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
 
     status = summary.status
-    console.print(f"Status: {status}")
+
+    if status == "success":
+        message = summary.final_message or "Success!"
+        console.print(f"[green]{message}[/green]")
+    else:
+        console.print(f"Status: {status}")
+        if summary.final_message:
+            console.print(summary.final_message)
+
     if summary.intent:
         console.print(
             f"Mode: {summary.intent.intent} ({summary.intent.topic}), Passes: {len(summary.passes)}"
         )
+
+    if summary.urls:
+        preview_lines = ", ".join(f"{kind}: {url}" for kind, url in summary.urls.items())
+        console.print(f"Preview URLs: {preview_lines}")
 
     if status == "dry_run":
         raise typer.Exit(0)
