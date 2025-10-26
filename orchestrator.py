@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -19,7 +20,14 @@ from core.router import build_agent_plan, required_agents
 from core.runtime import ServerManager, prompt_for_start_command
 from core.stack import analyze_project
 from core.tui import SymphonyTUI
-from core.types import AgentHooks, PassOutcome, StackInfo, WorkflowConfig, WorkflowSummary
+from core.types import (
+    AgentHooks,
+    IntentResult,
+    PassOutcome,
+    StackInfo,
+    WorkflowConfig,
+    WorkflowSummary,
+)
 from gates.engine import evaluate as evaluate_gates, get_fix_instructions as build_gate_fix_instructions
 
 
@@ -34,6 +42,51 @@ def _stack_to_dict(stack: StackInfo) -> Dict[str, object]:
         "frontend": stack.frontend,
         "backend": stack.backend,
     }
+
+
+def _format_success_message(goal: str, intent: Optional[IntentResult], summary: WorkflowSummary) -> str:
+    """Create a friendly confirmation message for successful runs."""
+
+    passes_run = len(summary.passes)
+    changes_made = any(pass_outcome.changes_made for pass_outcome in summary.passes)
+
+    goal_text = goal.strip().rstrip(".")
+
+    if intent and intent.topic == "ui_ux":
+        base = f"Done! \"{goal_text}\" is handled and your UI/UX experience is polished."
+    else:
+        base = f"Done! \"{goal_text}\" is handled."
+
+    detail = ""
+    if passes_run:
+        detail = f" after {passes_run} pass{'es' if passes_run != 1 else ''}"
+
+    if changes_made:
+        tail = "Symphony applied targeted fixes for you to review."
+    else:
+        tail = "No code changes were needed—the experience already met the expectations."
+
+    return f"{base}{detail}. {tail}"
+
+
+def _format_stalled_message(failing_reasons: list[str]) -> str:
+    if failing_reasons:
+        issues = ", ".join(failing_reasons)
+        return (
+            "Run stopped because the same issues kept resurfacing: "
+            f"{issues}. Address them manually and try again."
+        )
+    return "Run stopped because progress stalled. Review the latest output and try again."
+
+
+def _format_max_passes_message(failing_reasons: Optional[list[str]]) -> str:
+    if failing_reasons:
+        issues = ", ".join(failing_reasons)
+        return (
+            "Reached the maximum number of passes while the following items still need attention: "
+            f"{issues}."
+        )
+    return "Reached the maximum number of passes without clearing every expectation."
 
 
 @dataclass
@@ -96,69 +149,81 @@ def run_workflow(
 
     tui = SymphonyTUI(detailed=config.detailed_log)
     success = False
+    keep_servers_running = False
+    preview_url: Optional[str] = None
+    server_manager = ServerManager(stack)
 
-    with tui.live():
-        tui.set_header(
-            Project=str(project_path),
-            Goal=config.goal,
-            Mode=f"{intent.intent} ({intent.topic})",
-            Passes=config.max_passes,
-            Run=run_id,
-        )
+    try:
+        with tui.live():
+            tui.set_header(
+                Project=str(project_path),
+                Goal=config.goal,
+                Mode=f"{intent.intent} ({intent.topic})",
+                Passes=config.max_passes,
+                Run=run_id,
+            )
 
-        tui.update_status("Stack Detection", "RUNNING")
-        time.sleep(0.05)
-        stack_summary = ", ".join(filter(None, [stack.frontend or "frontend?", stack.backend or "backend?"]))
-        tui.update_status("Stack Detection", "COMPLETE", detail=stack_summary)
+            tui.update_status("Stack Detection", "RUNNING")
+            time.sleep(0.05)
+            stack_summary = ", ".join(
+                filter(None, [stack.frontend or "frontend?", stack.backend or "backend?"])
+            )
+            tui.update_status("Stack Detection", "COMPLETE", detail=stack_summary)
 
-        tui.add_voice("Analyzing project and classifying intent…")
-        tui.add_sub_info(f"Detected intent: {intent.intent}, topic: {intent.topic}")
+            tui.add_voice("Analyzing project and classifying intent…")
+            tui.add_sub_info(f"Detected intent: {intent.intent}, topic: {intent.topic}")
 
-        if config.dry_run:
-            tui.add_voice("Dry-run mode – no files will be written.")
-            tui.add_sub_info("Agent plan:")
-            for step in plan:
-                tui.add_sub_info(f"{step.agent}: {step.description}")
-            tui.add_sub_info(f"Start commands detected: {len(stack.start_commands)}")
-            summary.status = "dry_run"
-            return summary
+            if config.dry_run:
+                tui.add_voice("Dry-run mode – no files will be written.")
+                tui.add_sub_info("Agent plan:")
+                for step in plan:
+                    tui.add_sub_info(f"{step.agent}: {step.description}")
+                tui.add_sub_info(f"Start commands detected: {len(stack.start_commands)}")
+                summary.status = "dry_run"
+                return summary
 
-        _require_api_keys(agents_needed)
+            _require_api_keys(agents_needed)
 
-        if not stack.start_commands:
-            tui.add_voice("No start command detected. Requesting manual command…")
-            manual = prompt_for_start_command(config.goal, project_path)
-            stack.start_commands.append(manual)
+            if not stack.start_commands:
+                tui.add_voice("No start command detected. Requesting manual command…")
+                manual = prompt_for_start_command(config.goal, project_path)
+                stack.start_commands.append(manual)
 
-        server_manager = ServerManager(stack)
-        tui.update_status("Servers", "STARTING")
-        urls = server_manager.start_all()
-        tui.update_status("Servers", "READY", detail=", ".join(f"{k}: {v}" for k, v in urls.items()))
-        summary.urls = urls
+            tui.update_status("Servers", "STARTING")
+            urls = server_manager.start_all()
+            tui.update_status("Servers", "READY", detail=", ".join(f"{k}: {v}" for k, v in urls.items()))
+            summary.urls = urls
+            preview_url = urls.get("frontend") or stack.frontend_url or urls.get("backend")
 
-        hooks = hooks or DefaultAgentHooks(project_path, brain_config, sensory_config, run_id)
+            hooks = hooks or DefaultAgentHooks(project_path, brain_config, sensory_config, run_id)
 
-        expectations = build_expectations(config.goal, page_type_hint=None, stack=_stack_to_dict(stack))
-        tui.update_status("Expectations", "READY", detail=f"{len(expectations.get('capabilities', {}))} capabilities")
+            expectations = build_expectations(
+                config.goal, page_type_hint=None, stack=_stack_to_dict(stack)
+            )
+            tui.update_status(
+                "Expectations",
+                "READY",
+                detail=f"{len(expectations.get('capabilities', {}))} capabilities",
+            )
 
-        last_report: Optional[SensoryReport] = None
-        last_failures: Optional[list[str]] = None
-        stagnation_counter = 0
+            last_report: Optional[SensoryReport] = None
+            last_failures: Optional[list[str]] = None
+            stagnation_counter = 0
 
-        try:
             for index in range(1, config.max_passes + 1):
                 tui.update_status("Pass", f"{index}/{config.max_passes}", detail="running")
                 changes_made = False
                 pass_report: Optional[SensoryReport] = None
                 failing_reasons: list[str] = []
+                pass_outcome: Optional[PassOutcome] = None
 
                 for step in plan:
                     if step.agent == "vision":
-                        frontend_url = urls.get("frontend") or stack.frontend_url
-                        if not frontend_url:
+                        vision_url = preview_url or urls.get("frontend") or stack.frontend_url
+                        if not vision_url:
                             raise RuntimeError("Vision agent requires a frontend URL")
-                        tui.add_voice(step.description)
-                        report = hooks.run_vision(frontend_url, expectations, pass_index=index)
+                        tui.add_voice(f"Vision: {step.description}…")
+                        report = hooks.run_vision(vision_url, expectations, pass_index=index)
                         if isinstance(report, SensoryReport):
                             pass_report = report
                             report_data = report.to_dict()
@@ -166,22 +231,26 @@ def run_workflow(
                             report_data = report
                         gate_result = evaluate_gates(expectations, report_data)
                         failing_reasons = gate_result["failing_reasons"]
-                        tui.add_sub_info(
-                            "Issues: " + (", ".join(failing_reasons) if failing_reasons else "none")
-                        )
-                        if not failing_reasons:
-                            summary.add_pass(
-                                PassOutcome(
-                                    index=index,
-                                    vision_passed=True,
-                                    changes_made=changes_made,
-                                    failing_reasons=[],
-                                    summary={"status": "passed"},
-                                )
+                        if failing_reasons:
+                            tui.add_sub_info(
+                                "Issues: " + ", ".join(failing_reasons)
                             )
+                        else:
+                            tui.add_sub_info("Issues: none")
+                            pass_outcome = PassOutcome(
+                                index=index,
+                                vision_passed=True,
+                                changes_made=changes_made,
+                                failing_reasons=[],
+                                summary={"status": "passed"},
+                            )
+                            summary.add_pass(pass_outcome)
                             summary.status = "success"
-                            tui.set_footer("SUCCESS")
+                            final_message = _format_success_message(config.goal, intent, summary)
+                            summary.final_message = final_message
+                            tui.set_footer(final_message)
                             success = True
+                            keep_servers_running = config.open_browser and bool(preview_url)
                             break
                     elif step.agent == "brain":
                         if pass_report is None and last_report is None:
@@ -206,20 +275,20 @@ def run_workflow(
                                 f"Goal: {config.goal}\n\n"
                                 f"{instructions}\n"
                             )
-                        tui.add_voice(step.description)
+                        tui.add_voice(f"Brain: {step.description}…")
                         hooks.run_brain(instructions, pass_index=index)
                         changes_made = True
-                        tui.add_sub_info("Patched project files")
+                        tui.add_sub_info("Applied targeted fixes")
 
-                summary.add_pass(
-                    PassOutcome(
+                if pass_outcome is None:
+                    pass_outcome = PassOutcome(
                         index=index,
                         vision_passed=not failing_reasons,
                         changes_made=changes_made,
                         failing_reasons=failing_reasons,
                         summary={"issues": failing_reasons},
                     )
-                )
+                    summary.add_pass(pass_outcome)
 
                 if success:
                     break
@@ -231,25 +300,42 @@ def run_workflow(
                         stagnation_counter = 0
                     if stagnation_counter >= 1:
                         summary.status = "stalled"
-                        tui.set_footer("Stopped due to repeated failures")
+                        final_message = _format_stalled_message(failing_reasons)
+                        summary.final_message = final_message
+                        tui.set_footer(final_message)
                         break
                 last_failures = failing_reasons
                 last_report = pass_report
 
             if summary.status == "unknown":
                 summary.status = "max_passes"
-                tui.set_footer("Reached max passes without full success")
-        finally:
+                final_message = _format_max_passes_message(last_failures or [])
+                summary.final_message = final_message
+                tui.set_footer(final_message)
+    finally:
+        if not keep_servers_running:
             server_manager.stop_all()
 
-    if success and config.open_browser:
-        frontend_url = summary.urls.get("frontend") or stack.frontend_url
-        if frontend_url:
-            try:
-                import webbrowser
+    if keep_servers_running and preview_url:
+        try:
+            import webbrowser
 
-                webbrowser.open(frontend_url)
-            except Exception:
-                pass
+            webbrowser.open(preview_url)
+        except Exception:
+            pass
+
+        console.print(
+            f"[green]Preview ready at {preview_url}. Symphony will keep the local servers running while you take a look.[/green]"
+        )
+        prompt_text = "Press Enter when you're done previewing to shut everything down…"
+        if sys.stdin.isatty():
+            try:
+                input(prompt_text)
+            except EOFError:
+                time.sleep(5)
+        else:
+            time.sleep(5)
+
+        server_manager.stop_all()
 
     return summary
