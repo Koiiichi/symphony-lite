@@ -77,6 +77,7 @@ class SensoryReport:
     model_ids: Dict[str, str] = field(default_factory=dict)
     expectations: Dict[str, Any] = field(default_factory=dict)
     failing_reasons: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -96,7 +97,8 @@ class SensoryReport:
             "vision_scores": self.vision_scores,
             "model_ids": self.model_ids,
             "expectations": self.expectations,
-            "failing_reasons": self.failing_reasons
+            "failing_reasons": self.failing_reasons,
+            "warnings": self.warnings,
         }
     
     def to_json(self) -> str:
@@ -121,7 +123,13 @@ class SensoryReport:
                 Screenshot(**s) if isinstance(s, dict) else s
                 for s in data["screens"]
             ]
-        
+
+        warnings = data.get("warnings")
+        if isinstance(warnings, list):
+            data["warnings"] = [str(w) for w in warnings if w is not None]
+        else:
+            data["warnings"] = []
+
         return cls(**data)
     
     def get_failing_gates(self, thresholds: Optional[Dict[str, float]] = None) -> List[str]:

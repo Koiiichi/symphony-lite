@@ -8,7 +8,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional, Tuple
 
 from rich.console import Console
 
@@ -132,6 +132,12 @@ def _summarize_vision_report(report_data: Dict[str, object]) -> list[str]:
             if wcag_level:
                 text += f", target: {wcag_level}"
             lines.append(text)
+
+    warnings = report_data.get("warnings")
+    if isinstance(warnings, Iterable) and not isinstance(warnings, (str, bytes)):
+        warn_list = [str(w) for w in warnings if w]
+        if warn_list:
+            lines.append("Warnings – " + "; ".join(warn_list))
 
     return lines
 
@@ -340,7 +346,16 @@ def run_workflow(
                 tui.stop_activity("Local services ready", icon="[ready]")
             tui.update_status("Servers", "READY", detail=", ".join(f"{k}: {v}" for k, v in urls.items()))
             summary.urls = urls
-            preview_url = urls.get("frontend") or detected_stack.frontend_url or urls.get("backend")
+            frontend_url = urls.get("frontend") or detected_stack.frontend_url
+            backend_url = urls.get("backend") or detected_stack.backend_url
+
+            preview_url = frontend_url or backend_url
+            if backend_url and (not detected_stack.frontend or detected_stack.frontend == "static"):
+                preview_url = backend_url
+            elif not preview_url and backend_url:
+                preview_url = backend_url
+
+            keep_servers_running = config.open_browser and bool(preview_url)
 
             hooks = hooks or DefaultAgentHooks(project_path, brain_config, sensory_config, run_id)
 
@@ -358,6 +373,7 @@ def run_workflow(
             stagnation_counter = 0
 
             brain_in_plan = any(step.agent == "brain" for step in plan)
+            pending_handoff: Optional[Tuple[str, str]] = None
 
             if plan:
                 tui.add_voice(
@@ -375,6 +391,10 @@ def run_workflow(
                 for step_idx, step in enumerate(plan):
                     remaining_steps = plan[step_idx + 1 :]
                     if step.agent == "vision":
+                        if pending_handoff:
+                            message, icon = pending_handoff
+                            tui.stop_activity(message, icon=icon)
+                            pending_handoff = None
                         vision_url = (
                             preview_url or urls.get("frontend") or detected_stack.frontend_url
                         )
@@ -402,10 +422,11 @@ def run_workflow(
                             if brain_in_plan:
                                 issue_count = len(failing_reasons)
                                 handoff = (
-                                    f"Vision ⇢ Brain: Sharing {issue_count} finding"
+                                    f"Vision => Brain: Sharing {issue_count} finding"
                                     f"{'s' if issue_count != 1 else ''} for fixes."
                                 )
-                                tui.add_voice(handoff, icon="->")
+                                pending_handoff = (handoff, ">>")
+                                tui.start_activity("Hand-off: Vision => Brain…", spinner="pulsing_star")
                         else:
                             tui.add_sub_info("Issues: none")
                             pass_outcome = PassOutcome(
@@ -424,6 +445,11 @@ def run_workflow(
                             keep_servers_running = config.open_browser and bool(preview_url)
                             break
                     elif step.agent == "brain":
+                        if pending_handoff:
+                            message, icon = pending_handoff
+                            tui.stop_activity(message, icon=icon)
+                            pending_handoff = None
+
                         if pass_report is None and last_report is None:
                             instructions = get_generation_instructions(
                                 str(project_path),
@@ -469,10 +495,11 @@ def run_workflow(
                             future_step.agent == "vision" for future_step in remaining_steps
                         )
                         if has_follow_up_vision:
-                            tui.add_voice(
-                                "Brain ⇢ Vision: Updates ready for validation.",
-                                icon="<-",
+                            pending_handoff = (
+                                "Brain => Vision: Updates ready for validation.",
+                                "<<",
                             )
+                            tui.start_activity("Hand-off: Brain => Vision…", spinner="pulsing_star")
 
                 if pass_outcome is None:
                     pass_outcome = PassOutcome(
@@ -518,9 +545,15 @@ def run_workflow(
         except Exception:
             pass
 
-        console.print(
-            f"[green]Preview ready at {preview_url}. Symphony will keep the local servers running while you take a look.[/green]"
-        )
+        if summary.status == "success":
+            preview_line = (
+                f"Preview ready at {preview_url}. Symphony will keep the local servers running while you review the changes."
+            )
+        else:
+            preview_line = (
+                f"Preview ready at {preview_url}. Symphony will keep the local servers running so you can inspect the current state before retrying."
+            )
+        console.print(preview_line)
         prompt_text = "Press Enter when you're done previewing to shut everything down…"
         if sys.stdin.isatty():
             try:
