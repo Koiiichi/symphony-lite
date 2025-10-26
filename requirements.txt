@@ -1,6 +1,6 @@
 # Core dependencies for Symphony-Lite
 typer==0.9.0
-rich==13.7.0
+rich>=13.9.4,<14.0.0
 smolagents>=0.2.0
 openai>=1.0.0
 python-dotenv>=1.0.0

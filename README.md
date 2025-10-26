@@ -7,7 +7,7 @@
    ```bash
    git clone <repository-url>
    cd symphony-lite
-   pip install -r requirements.txt
+   python -m pip install -r requirements.txt  # use `py -m pip` on Windows
    ```
 2. Provide API keys via environment variables or a `.env` file in the project directory:
    ```bash
@@ -16,13 +16,19 @@
    ```
 
 ### Run
-* From inside an existing project:
+* From inside an existing project (the script ensures the bundled virtualenv is ready):
   ```bash
-  symphony "Improve the mobile navbar spacing"
+  python symphony.py "Improve the mobile navbar spacing"
   ```
 * From any directory with an explicit project path:
   ```bash
-  symphony --project ./demo "Create a marketing landing page"
+  python symphony.py --project ./demo "Create a marketing landing page"
+  ```
+* Optional – add a shell alias once things work:
+  ```bash
+  alias symphony="python /path/to/symphony.py"                # macOS/Linux shells
+  doskey symphony=py C:\path\to\symphony.py $*              # Windows Command Prompt
+  function symphony { py C:\path\to\symphony.py $args }     # Windows PowerShell
   ```
 
 Common flags:
