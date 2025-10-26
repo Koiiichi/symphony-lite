@@ -25,7 +25,7 @@ class GateRegistry:
     
     def _register_default_predicates(self):
         """Register built-in predicates."""
-        
+
         self.register("kpi_min", self._kpi_min)
         self.register("charts_min", self._charts_min)
         self.register("tables_min", self._tables_min)
@@ -34,13 +34,32 @@ class GateRegistry:
         self.register("alignment_score", self._alignment_score)
         self.register("spacing_score", self._spacing_score)
         self.register("contrast_score", self._contrast_score)
-    
+
+    def _get_capability_config(self, expectations: Dict, key: str) -> Dict[str, Any]:
+        """Normalize capability expectation values to a dictionary."""
+
+        capabilities = expectations.get("capabilities", {})
+        value = capabilities.get(key, {})
+
+        if isinstance(value, dict):
+            return value
+
+        if isinstance(value, bool):
+            # Treat booleans as a simple required flag.
+            return {"required": value}
+
+        if isinstance(value, (int, float)):
+            # Numeric capabilities map to a minimum requirement.
+            return {"min": value}
+
+        return {}
+
     def _kpi_min(self, expectations: Dict, observations: Dict) -> Tuple[bool, str]:
         """Check minimum KPI tiles count."""
-        required = expectations.get("capabilities", {}).get("kpi_tiles", {}).get("min", 0)
+        required = self._get_capability_config(expectations, "kpi_tiles").get("min", 0)
         if required == 0:
             return True, ""
-        
+
         actual = observations.get("elements", {}).get("kpi_tiles", 0)
         if actual >= required:
             return True, ""
@@ -48,10 +67,10 @@ class GateRegistry:
     
     def _charts_min(self, expectations: Dict, observations: Dict) -> Tuple[bool, str]:
         """Check minimum charts count."""
-        required = expectations.get("capabilities", {}).get("charts", {}).get("min", 0)
+        required = self._get_capability_config(expectations, "charts").get("min", 0)
         if required == 0:
             return True, ""
-        
+
         actual = observations.get("elements", {}).get("charts", 0)
         if actual >= required:
             return True, ""
@@ -59,21 +78,22 @@ class GateRegistry:
     
     def _tables_min(self, expectations: Dict, observations: Dict) -> Tuple[bool, str]:
         """Check minimum tables count."""
-        required = expectations.get("capabilities", {}).get("tables", {}).get("min", 0)
+        required = self._get_capability_config(expectations, "tables").get("min", 0)
         if required == 0:
             return True, ""
-        
+
         actual = observations.get("elements", {}).get("tables", 0)
         if actual >= required:
             return True, ""
         return False, f"tables: expected >={required}, got {actual}"
-    
+
     def _filters_required(self, expectations: Dict, observations: Dict) -> Tuple[bool, str]:
         """Check if filters are present when required."""
-        required = expectations.get("capabilities", {}).get("filters", {}).get("required", False)
+        config = self._get_capability_config(expectations, "filters")
+        required = config.get("required", False)
         if not required:
             return True, ""
-        
+
         actual = observations.get("elements", {}).get("filters", 0)
         if actual > 0:
             return True, ""
