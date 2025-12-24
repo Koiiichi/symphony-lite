@@ -115,8 +115,32 @@ class ServerManager:
             except (subprocess.TimeoutExpired, FileNotFoundError) as e:
                 print(f" Warning: Failed to setup Python environment: {e}")
 
+    def _is_port_in_use(self, port: int) -> bool:
+        """Check if a port is already in use."""
+        try:
+            with socket.create_connection(("localhost", port), timeout=1):
+                return True
+        except (OSError, socket.timeout):
+            return False
+
     def start_all(self, *, timeout: int = 60, preferred_kind: Optional[str] = None) -> Dict[str, str]:
         urls: Dict[str, str] = {}
+
+        # Check for port conflicts before starting anything
+        port_conflicts = []
+        for command in self.stack.start_commands:
+            if command.port:
+                if self._is_port_in_use(command.port):
+                    port_conflicts.append((command.port, command.description or command.kind))
+        
+        if port_conflicts:
+            error_msg = "Port conflicts detected:\n"
+            for port, desc in port_conflicts:
+                error_msg += f"  - Port {port} ({desc}) is already in use\n"
+            error_msg += "\nTo fix this, run:\n"
+            for port, _ in port_conflicts:
+                error_msg += f"  lsof -ti:{port} | xargs kill -9\n"
+            raise RuntimeError(error_msg.strip())
 
         # First, ensure all dependencies are installed
         for command in self.stack.start_commands:

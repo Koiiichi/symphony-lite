@@ -59,9 +59,11 @@ def run_in_venv(args):
     if not is_venv_setup():
         setup_venv()
     
-    # Run the CLI
-    subprocess.run([str(python_exe), str(cli_script)] + args)
+    # Run the CLI - use exec to replace current process for live TUI updates
+    cmd = [str(python_exe), str(cli_script)] + args
+    os.execv(str(python_exe), cmd)
 
 if __name__ == "__main__":
     # Pass all arguments to the CLI
     run_in_venv(sys.argv[1:])
+

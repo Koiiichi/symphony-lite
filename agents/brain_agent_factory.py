@@ -249,8 +249,11 @@ def create_brain_agent(
         model_kwargs["provider"] = config.provider
     if config.api_base:
         model_kwargs["api_base"] = config.api_base
-    if config.api_key:
-        model_kwargs["api_key"] = config.api_key
+    
+    # Use API key from config, or fall back to environment variable
+    api_key = config.api_key or os.getenv("SYMPHONY_BRAIN_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if api_key:
+        model_kwargs["api_key"] = api_key
     
     try:
         model = load_model(config.model_type, config.model_id, **model_kwargs)

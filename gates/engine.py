@@ -164,6 +164,28 @@ class GateRegistry:
         if actual >= threshold:
             return True, ""
         return False, f"contrast_score: {actual:.2f} < {threshold:.2f}"
+    
+    def _features_present(self, expectations: Dict, observations: Dict) -> Tuple[bool, str]:
+        """Check if expected features are present on the page."""
+        expected_features = expectations.get("expected_features", [])
+        if not expected_features:
+            return True, ""
+        
+        feature_results = observations.get("feature_verification", {})
+        missing = feature_results.get("missing", [])
+        
+        if not missing:
+            return True, ""
+        
+        # Build failure message with descriptions
+        details = feature_results.get("details", {})
+        failure_msgs = []
+        for feature_id in missing:
+            detail = details.get(feature_id, {})
+            desc = detail.get("description", feature_id)
+            failure_msgs.append(f"missing: {desc}")
+        
+        return False, "; ".join(failure_msgs)
 
 
 _default_registry = GateRegistry()
@@ -273,5 +295,18 @@ def get_fix_instructions(
                     "- A 501 status often means the request hit the static server. Point the frontend fetch to the Flask API (e.g. http://localhost:5000/api/contact) or proxy it through the backend.\n"
                 )
             instructions.append("".join(tips))
+        
+        elif "missing:" in reason:
+            # Feature verification failure
+            feature_desc = reason.replace("missing:", "").strip()
+            instructions.append(
+                f"### Missing Feature: {feature_desc}\n"
+                f"- The page is missing the expected feature: {feature_desc}\n"
+                "- Add the required HTML element to the page\n"
+                "- For toggles/buttons: Add a visible, clickable button element\n"
+                "- Use appropriate CSS classes (e.g., 'toggle', 'switch', 'theme-toggle')\n"
+                "- Add aria-label for accessibility\n"
+                "- Ensure the element is visible and functional\n"
+            )
     
     return "\n".join(instructions)

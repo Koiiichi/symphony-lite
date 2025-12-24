@@ -272,7 +272,10 @@ def analyze_current_view() -> dict:
     Returns:
         Dict with alignment_score, spacing_score, contrast_score, visible_sections
     """
-    if not HAS_OPENAI or not os.getenv("OPENAI_API_KEY"):
+    vision_key = os.getenv("SYMPHONY_VISION_API_KEY")
+    
+    if not HAS_OPENAI or not vision_key:
+        logger.info("Vision API unavailable, using heuristic fallback")
         return analyze_view_heuristic()
     
     try:
@@ -280,26 +283,39 @@ def analyze_current_view() -> dict:
         png = driver.get_screenshot_as_png()
         b64 = base64.b64encode(png).decode()
         
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        prompt = """
-        Analyze this webpage screenshot and rate it from 0.0 to 1.0 on:
-        - alignment_score: How well elements are aligned and positioned
-        - spacing_score: Quality of whitespace and element spacing
-        - contrast_score: Text/background contrast and readability
+        logger.info("Analyzing screenshot with Vision API...")
         
-        Also identify which sections are visible:
-        - hero (main banner/header area)
-        - projects (portfolio/work showcase)
-        - contact (contact form or contact info)
-        - about (about section)
-        - services (services or features)
-        - testimonials (reviews or testimonials)
+        client = OpenAI(api_key=vision_key)
+        prompt = """You are a UI/UX expert. Analyze this webpage screenshot and provide objective scores from 0.0 to 1.0.
+
+SCORING CRITERIA:
+- alignment_score (0.0-1.0): Grid/flexbox consistency, visual balance, element alignment
+  - 0.0-0.3: Major misalignments, inconsistent layouts
+  - 0.4-0.6: Some alignment issues, room for improvement
+  - 0.7-0.8: Good alignment with minor issues
+  - 0.9-1.0: Excellent, professional-grade alignment
+
+- spacing_score (0.0-1.0): Whitespace usage, padding/margin consistency
+  - 0.0-0.3: Cramped or overly sparse, inconsistent
+  - 0.4-0.6: Adequate but could be improved
+  - 0.7-0.8: Good rhythm and breathing room
+  - 0.9-1.0: Excellent, consistent spacing system
+
+- contrast_score (0.0-1.0): Text readability, color contrast ratios
+  - 0.0-0.3: Hard to read, poor contrast
+  - 0.4-0.6: Readable but could be better
+  - 0.7-0.8: Good contrast, clear text
+  - 0.9-1.0: Excellent WCAG compliance
+
+Also identify visible sections: hero, projects, contact, about, services, testimonials
+
+Return ONLY valid JSON: {"alignment_score": 0.X, "spacing_score": 0.X, "contrast_score": 0.X, "visible_sections": ["section1", "section2"]}"""
         
-        Return ONLY a JSON object with keys: alignment_score, spacing_score, contrast_score, visible_sections (array).
-        """
+        # Use gpt-4o-mini for faster, cheaper vision analysis
+        model = os.getenv("SYMPHONY_VISION_MODEL", "gpt-4o-mini")
         
         resp = client.chat.completions.create(
-            model=os.getenv("MODEL_ID", "gpt-4o"),
+            model=model,
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": [
@@ -312,15 +328,24 @@ def analyze_current_view() -> dict:
         
         try:
             content = resp.choices[0].message.content.strip()
+            logger.debug("Vision API response: %s", content)
+            
             # Extract JSON from response
             if '{' in content and '}' in content:
                 start = content.find('{')
                 end = content.rfind('}') + 1
                 json_str = content[start:end]
-                return json.loads(json_str)
+                result = json.loads(json_str)
+                result["source"] = "vision_api"
+                logger.info("Vision scores: alignment=%.2f, spacing=%.2f, contrast=%.2f",
+                           result.get("alignment_score", 0),
+                           result.get("spacing_score", 0),
+                           result.get("contrast_score", 0))
+                return result
             else:
                 return json.loads(content)
         except (json.JSONDecodeError, ValueError) as e:
+            logger.warning("Vision JSON parse failed: %s", str(e))
             report = analyze_view_heuristic()
             report.setdefault("warnings", []).append(
                 f"Vision JSON parse failed ({e.__class__.__name__})"
@@ -328,6 +353,7 @@ def analyze_current_view() -> dict:
             return report
 
     except Exception as e:
+        logger.warning("Vision analysis failed: %s", str(e))
         report = analyze_view_heuristic()
         report.setdefault("warnings", []).append(
             f"Vision analysis failed ({e.__class__.__name__})"
@@ -466,6 +492,91 @@ def _count_elements() -> dict:
         }
 
 
+def _verify_features(expected_features: list) -> dict:
+    """Verify that expected features exist on the page.
+    
+    Args:
+        expected_features: List of feature specs from goal interpreter
+        
+    Returns:
+        Dict with feature verification results
+    """
+    results = {
+        "verified": [],
+        "missing": [],
+        "details": {}
+    }
+    
+    if not expected_features:
+        return results
+    
+    try:
+        driver = helium.get_driver()
+        page_source = driver.page_source.lower()
+        
+        for feature in expected_features:
+            feature_id = feature.get("id", "unknown")
+            selectors = feature.get("selectors", [])
+            keywords = feature.get("keywords", [])
+            description = feature.get("description", feature_id)
+            
+            found = False
+            found_by = None
+            
+            # Try CSS selectors first
+            for selector in selectors:
+                try:
+                    elements = driver.find_elements("css selector", selector)
+                    if elements and any(el.is_displayed() for el in elements):
+                        found = True
+                        found_by = f"selector: {selector}"
+                        break
+                except Exception:
+                    continue
+            
+            # Fall back to keyword search in page source
+            if not found:
+                for keyword in keywords:
+                    if keyword.lower() in page_source:
+                        # Verify it's not just in a script or comment
+                        try:
+                            # Check for visible text or aria-label
+                            text_elements = driver.find_elements("xpath", f"//*[contains(text(), '{keyword}')]")
+                            aria_elements = driver.find_elements("css selector", f"[aria-label*='{keyword}']")
+                            if text_elements or aria_elements:
+                                found = True
+                                found_by = f"keyword: {keyword}"
+                                break
+                        except Exception:
+                            pass
+            
+            # Record result
+            results["details"][feature_id] = {
+                "found": found,
+                "description": description,
+                "found_by": found_by
+            }
+            
+            if found:
+                results["verified"].append(feature_id)
+            else:
+                results["missing"].append(feature_id)
+        
+    except Exception as e:
+        logger.error("Feature verification failed: %s", str(e))
+        # Mark all as missing if verification failed
+        for feature in expected_features:
+            feature_id = feature.get("id", "unknown")
+            results["missing"].append(feature_id)
+            results["details"][feature_id] = {
+                "found": False,
+                "description": feature.get("description", feature_id),
+                "error": str(e)
+            }
+    
+    return results
+
+
 def _test_form_interaction(interaction_spec: dict) -> dict:
     """Test a form interaction based on spec.
     
@@ -602,9 +713,12 @@ def inspect_site(
         # Count elements for generic capabilities
         elements = _count_elements()
         
-        # Test interactions from expectations
+        # Default interaction result
+        interaction = InteractionResult()
+        
+        # Test interactions from expectations (in qa and hybrid modes)
         interactions_results = {}
-        if mode.lower() == "qa":
+        if mode.lower() in ("qa", "hybrid"):
             for interaction_spec in expectations.get("interactions", []):
                 if interaction_spec["type"] == "form_submit":
                     result = _test_form_interaction(interaction_spec)
@@ -622,7 +736,16 @@ def inspect_site(
                     "notes": interaction.details,
                 }
         else:
-            warnings.append("Interactive checks skipped in non-qa vision mode")
+            warnings.append("Interactive checks skipped in visual-only mode")
+        
+        # Verify expected features exist on the page
+        expected_features = expectations.get("expected_features", [])
+        feature_results = _verify_features(expected_features)
+        if feature_results["missing"]:
+            for missing_id in feature_results["missing"]:
+                detail = feature_results["details"].get(missing_id, {})
+                desc = detail.get("description", missing_id)
+                warnings.append(f"Missing expected feature: {desc}")
         
         # Step 3: Final analysis after interaction
         screen3_path = _save_step_screenshot("3_submit", run_id)
@@ -643,11 +766,18 @@ def inspect_site(
         final_spacing = max(spacing_scores) if spacing_scores else 0.7
         final_contrast = max(contrast_scores) if contrast_scores else 0.7
         
+        # Check if any analysis used Vision API
+        used_vision_api = any(
+            s.get("source") == "vision_api" 
+            for s in [screen1, screen2, screen3]
+        )
+        
         # Build vision scores
         vision_scores = {
             "alignment": final_alignment,
             "spacing": final_spacing,
-            "contrast": final_contrast
+            "contrast": final_contrast,
+            "source": "vision_api" if used_vision_api else "heuristic"
         }
         
         # Determine status based on quality gates
@@ -673,6 +803,7 @@ def inspect_site(
             model_ids={"sensory": sensory_config.get("model_id", "gpt-4o")},
             expectations=expectations,
             warnings=deduped_warnings,
+            feature_verification=feature_results,
         )
         
         # Update status based on gates
@@ -682,12 +813,15 @@ def inspect_site(
         return report
         
     except Exception as e:
-        # Return error report
+        # Log the error for debugging
+        logger.error("Sensory agent failed: %s", str(e))
+        
+        # Return error report with fallback scores (not 0.0)
         return SensoryReport(
             status="needs_fix",
-            alignment_score=0.0,
-            spacing_score=0.0,
-            contrast_score=0.0,
+            alignment_score=0.5,
+            spacing_score=0.5,
+            contrast_score=0.5,
             visible_sections=[],
             interaction=InteractionResult(
                 contact_submitted=False,
@@ -696,7 +830,8 @@ def inspect_site(
             ),
             a11y=AccessibilityResult(violations=0, top_issues=[]),
             playwright=PlaywrightResult(passed=False, failed_tests=["Site inspection"], total_tests=1),
-            screens=[]
+            screens=[],
+            warnings=[f"Sensory agent error: {str(e)}"]
         )
         
     finally:

@@ -1,3 +1,4 @@
+Content of README.md (1424 bytes):
 Portfolio: Dark-themed portfolio with projects grid and contact form
 
 Files included
@@ -31,7 +32,7 @@ Unix/macOS
 4) Open http://localhost:8000/index.html
 
 Testing the contact API
-- curl -X POST http://localhost:5000/api/contact -H "Content-Type: application/json" -d '{"name":"Alice","email":"alice@example.com","message":"Hi"}'
+- curl -X POST http://localhost:5001/api/contact -H "Content-Type: application/json" -d '{"name":"Alice","email":"alice@example.com","message":"Hi"}'
 
 Notes
 - The backend is a simple Flask app with CORS enabled and an in-memory store for demo purposes.

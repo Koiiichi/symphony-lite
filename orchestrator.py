@@ -92,7 +92,10 @@ def _summarize_vision_report(report_data: Dict[str, object]) -> list[str]:
             if isinstance(value, (int, float)):
                 score_bits.append(f"{key}: {value:.2f}")
         if score_bits:
-            lines.append("Scores – " + ", ".join(score_bits))
+            vision_scores = report_data.get("vision_scores", {})
+            source = vision_scores.get("source", "heuristic")
+            source_indicator = " (via Vision API)" if source == "vision_api" else " (heuristic)"
+            lines.append("Scores – " + ", ".join(score_bits) + source_indicator)
 
     sections = report_data.get("visible_sections")
     if isinstance(sections, Iterable) and not isinstance(sections, (str, bytes)):

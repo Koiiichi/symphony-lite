@@ -68,7 +68,7 @@ def build_expectations(
         expectations = _load_expectations_from_file(expectations_file)
         return _apply_mode_filters(expectations, vision_mode)
 
-    if not HAS_OPENAI or not os.getenv("OPENAI_API_KEY"):
+    if not HAS_OPENAI or not os.getenv("SYMPHONY_BRAIN_API_KEY"):
         return _build_expectations_heuristic(goal, page_type_hint, vision_mode=vision_mode)
 
     try:
@@ -90,9 +90,9 @@ def _build_expectations_llm(
     page_type_hint: Optional[str],
     stack: Optional[Dict[str, Any]]
 ) -> Dict[str, Any]:
-    """Use gpt-5-nano to derive expectations from goal."""
+    """Use gpt-4o-mini to derive expectations from goal."""
     
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    client = OpenAI(api_key=os.getenv("SYMPHONY_BRAIN_API_KEY"))
     
     stack_info = ""
     if stack:
@@ -184,7 +184,9 @@ def _build_expectations_heuristic(
         expectations["capabilities"]["kpi_tiles"]["min"] = 3
         expectations["capabilities"]["charts"]["min"] = 1
         expectations["capabilities"]["tables"]["min"] = 1
-        expectations["capabilities"]["filters"]["required"] = True
+        # Only require filters if explicitly mentioned
+        if "filter" in goal_lower:
+            expectations["capabilities"]["filters"]["required"] = True
     
     if any(keyword in goal_lower for keyword in ["contact", "contact form", "get in touch"]):
         expectations["interactions"].append({
@@ -212,6 +214,92 @@ def _build_expectations_heuristic(
             "expect_http_2xx": True,
             "expect_success_banner": True
         })
+    
+    # Extract expected features from the goal
+    expected_features = []
+    
+    # Toggle/switch features
+    if any(word in goal_lower for word in ["toggle", "switch", "dark mode", "light mode", "theme"]):
+        expected_features.append({
+            "id": "theme_toggle",
+            "type": "button",
+            "keywords": ["toggle", "switch", "theme", "mode", "dark", "light"],
+            "selectors": ["[class*='toggle']", "[class*='switch']", "[class*='theme']", "button[aria-label*='theme']", "button[aria-label*='mode']"],
+            "description": "Dark/light mode toggle button"
+        })
+    
+    # Search functionality
+    if any(word in goal_lower for word in ["search", "search bar", "search box"]):
+        expected_features.append({
+            "id": "search_feature",
+            "type": "input",
+            "keywords": ["search"],
+            "selectors": ["input[type='search']", "[class*='search']", "#search"],
+            "description": "Search input field"
+        })
+    
+    # Modal/popup features
+    if any(word in goal_lower for word in ["modal", "popup", "dialog"]):
+        expected_features.append({
+            "id": "modal_feature",
+            "type": "element",
+            "keywords": ["modal", "popup", "dialog"],
+            "selectors": ["[class*='modal']", "[class*='popup']", "[role='dialog']"],
+            "description": "Modal or popup element"
+        })
+    
+    # Navigation menu
+    if any(word in goal_lower for word in ["menu", "hamburger", "nav", "navigation"]):
+        expected_features.append({
+            "id": "navigation_menu",
+            "type": "element",
+            "keywords": ["menu", "nav", "navigation"],
+            "selectors": ["nav", "[class*='menu']", "[class*='nav']", "[role='navigation']"],
+            "description": "Navigation menu"
+        })
+    
+    # Dropdown
+    if "dropdown" in goal_lower or "select" in goal_lower:
+        expected_features.append({
+            "id": "dropdown_feature",
+            "type": "element",
+            "keywords": ["dropdown", "select"],
+            "selectors": ["select", "[class*='dropdown']", "[class*='select']"],
+            "description": "Dropdown or select element"
+        })
+    
+    # Carousel/slider
+    if any(word in goal_lower for word in ["carousel", "slider", "slideshow"]):
+        expected_features.append({
+            "id": "carousel_feature",
+            "type": "element",
+            "keywords": ["carousel", "slider", "slide"],
+            "selectors": ["[class*='carousel']", "[class*='slider']", "[class*='swiper']"],
+            "description": "Carousel or slider component"
+        })
+    
+    # Tabs
+    if "tab" in goal_lower:
+        expected_features.append({
+            "id": "tabs_feature",
+            "type": "element",
+            "keywords": ["tab"],
+            "selectors": ["[role='tablist']", "[class*='tab']"],
+            "description": "Tab navigation component"
+        })
+    
+    # Add to button
+    if any(word in goal_lower for word in ["add button", "create button", "new button"]):
+        expected_features.append({
+            "id": "action_button",
+            "type": "button",
+            "keywords": ["add", "create", "new"],
+            "selectors": ["button"],
+            "description": "Action button"
+        })
+    
+    if expected_features:
+        expectations["expected_features"] = expected_features
 
     return _apply_mode_filters(expectations, vision_mode)
 

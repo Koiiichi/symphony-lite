@@ -1,5 +1,7 @@
 # Symphony-Lite
 
+> **Requires Python 3.10 or higher**
+
 ## Quick Start
 
 ### Install
@@ -41,13 +43,17 @@
    ```
 
 ### Run
-* From inside an existing project (the script ensures the bundled virtualenv is ready):
+**Important**: Always run `symphony.py` from the symphony-lite repository root directory.
+
+* To work on a project, use the `--project` flag:
   ```bash
-  python symphony.py "Improve the mobile navbar spacing"
+  # From symphony-lite root
+  python symphony.py --project ./projects/portfolio "Ensure contact form works"
   ```
-* From any directory with an explicit project path:
+* If you're already in a project directory, navigate back to the root first:
   ```bash
-  python symphony.py --project ./demo "Create a marketing landing page"
+  cd /path/to/symphony-lite
+  python symphony.py --project ./projects/portfolio "Create a marketing landing page"
   ```
 * Optional – add a shell alias once things work:
   ```bash

@@ -15,7 +15,7 @@ from gates.engine import evaluate as evaluate_gates
 # Local config classes for testing
 @dataclass
 class BrainConfig:
-    model_id: str = "gpt-5-nano"
+    model_id: str = "gpt-4o-mini"
     max_steps: int = 15
     verbosity: int = 1
 
@@ -29,7 +29,7 @@ print("="*70)
 
 # Test 1: Configuration
 print("\n1. Testing Configuration Classes...")
-brain_config = BrainConfig(model_id="gpt-5-nano", max_steps=15, verbosity=1)
+brain_config = BrainConfig(model_id="gpt-4o-mini", max_steps=15, verbosity=1)
 sensory_config = SensoryConfig(model_id="gpt-4o")
 print(f"   Brain Config: {brain_config.model_id}")
 print(f"   Sensory Config: {sensory_config.model_id}")
@@ -219,6 +219,6 @@ print("\nThe architecture successfully:")
 print("  - Removes hard-coded page types")
 print("  - Uses capability-based expectations")
 print("  - Evaluates gates via pluggable engine")
-print("  - Routes models correctly (Brain: gpt-5-nano, Sensory: gpt-4o)")
+print("  - Routes models correctly (Brain: gpt-4o-mini, Sensory: gpt-4o)")
 print("  - Returns correct exit codes (0=pass, 1=fail)")
 print("\nReady for end-to-end testing.")

@@ -78,6 +78,7 @@ class SensoryReport:
     expectations: Dict[str, Any] = field(default_factory=dict)
     failing_reasons: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    feature_verification: Dict[str, Any] = field(default_factory=dict)  # Feature verification results
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -99,6 +100,7 @@ class SensoryReport:
             "expectations": self.expectations,
             "failing_reasons": self.failing_reasons,
             "warnings": self.warnings,
+            "feature_verification": self.feature_verification,
         }
     
     def to_json(self) -> str:

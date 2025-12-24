@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Dark Portfolio - Contact</title>
+  <title>Dark Portfolio</title>
   <style>
     :root{
       --bg: #0b0b10;
@@ -48,6 +48,45 @@
       form { grid-template-columns: 1fr; }
     }
   </style>
+<style>
+  /* Light Theme Styles */
+  body.light-mode {
+    background: white;
+    color: black;
+  }
+  body.light-mode header {
+    background: rgba(255, 255, 255, 0.8);
+    color: black;
+  }
+  body.light-mode .card {
+    background: #f4f4f4;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+  }
+  body.light-mode .project {
+    background: #eaeaea;
+  }
+</style>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const toggleButton = document.createElement('button');
+    toggleButton.innerText = 'Toggle Light/Dark Mode';
+    toggleButton.style.marginLeft = '20px';
+    
+    const header = document.querySelector('header');
+    header.appendChild(toggleButton);
+
+    const currentTheme = localStorage.getItem('theme') || 'dark';
+    document.body.classList.toggle('light-mode', currentTheme === 'light');
+
+    toggleButton.addEventListener('click', function() {
+      document.body.classList.toggle('light-mode');
+      const newTheme = document.body.classList.contains('light-mode') ? 'light' : 'dark';
+      localStorage.setItem('theme', newTheme);
+    });
+  });
+</script>
+
 </head>
 <body>
   <header>
